@@ -29,6 +29,9 @@ import type {
   RuntimeRequestId,
   ScopedThreadRef,
   ServerConfig as T3ServerConfig,
+  ThreadConversationId,
+  ThreadConversation,
+  ThreadConversationState,
   ThreadId,
   UsageLimitsReport,
 } from "@t3tools/contracts";
@@ -146,6 +149,7 @@ import {
 } from "./ThreadComposer";
 import { ComposerPopoverHost } from "./ComposerPopoverHost";
 import { ThreadFeed, type ThreadFeedHistoryControls } from "./ThreadFeed";
+import { ThreadConversationPills } from "./ThreadConversationPills";
 import { useThreadTurnSubagents } from "./ThreadAgentsSheet";
 import { ComposerQueuedEditBanner } from "./ComposerQueuedEdit";
 import { useThreadQueuedCount } from "./ThreadQueueControl";
@@ -170,6 +174,18 @@ export interface ThreadDetailScreenProps {
   readonly feedbackSubmissions: ReadonlyArray<CodexFeedbackSubmission>;
   readonly onDismissFeedback: (id: MessageId) => void;
   readonly selectedThreadFeed: ReadonlyArray<ThreadFeedEntry>;
+  readonly threadConversations?: {
+    readonly conversations: readonly ThreadConversation[];
+    readonly selectedId: ThreadConversationId | null;
+    readonly onSelect: (id: ThreadConversationId | null) => void;
+    readonly onCreate: (title: string) => Promise<void>;
+    readonly onRename: (id: ThreadConversationId, title: string) => Promise<void>;
+    readonly onUpdateState: (
+      id: ThreadConversationId,
+      state: ThreadConversationState,
+    ) => Promise<void>;
+    readonly onAssignLatest: (id: ThreadConversationId) => Promise<void>;
+  };
   readonly pendingHandoff?: HandoffEndpoints | null;
   readonly activityRun: ThreadFeedLatestRun | null;
   readonly activeWorkStartedAt: string | null;
@@ -1038,6 +1054,12 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   return (
     <View className="flex-1">
       {!usesNativeWorkspaceColumns ? <NativeLayoutObserver onChange={setScreenMetrics} /> : null}
+      {props.threadConversations ? (
+        <ThreadConversationPills
+          {...props.threadConversations}
+          canEdit={props.canOperateThread && props.connectionStateLabel === "connected"}
+        />
+      ) : null}
       {showContent ? (
         <View
           style={{ flex: 1 }}

@@ -124,6 +124,22 @@ const handlers = {
         return yield* service.update(scope, input);
       }),
   ),
+  t3_conversation_list: McpToolAccess.reads((input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.McpInvocationContext;
+      const service = yield* ThreadMetadataMcpService.ThreadMetadataMcpService;
+      return yield* service.listConversations(scope, input);
+    }),
+  ),
+  t3_conversation_update: McpToolAccess.writesThreads(
+    (input) => [input.threadId],
+    (input) =>
+      Effect.gen(function* () {
+        const scope = yield* McpInvocationContext.McpInvocationContext;
+        const service = yield* ThreadMetadataMcpService.ThreadMetadataMcpService;
+        return yield* service.updateConversation(scope, input);
+      }),
+  ),
   t3_thread_send: McpToolAccess.writesThreads(
     (input) => [input.threadId],
     (input) =>

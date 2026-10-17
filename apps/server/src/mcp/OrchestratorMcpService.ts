@@ -714,6 +714,7 @@ function threadDetail(
   const latest = ThreadManagementService.latestRun(projection);
   const active = ThreadManagementService.latestActiveRun(projection);
   return {
+    conversations: projection.thread.conversations ?? [],
     threadId: projection.thread.id,
     projectId: projection.thread.projectId,
     title: projection.thread.title,
@@ -2523,6 +2524,7 @@ const make = Effect.gen(function* () {
               operation: "thread-send",
             }),
             threadId: input.threadId,
+            ...(input.conversationId === undefined ? {} : { conversationId: input.conversationId }),
             ...(parent === undefined ? {} : { senderThreadId: parent.thread.id }),
             messageId,
             text: input.message,

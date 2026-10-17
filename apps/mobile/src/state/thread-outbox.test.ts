@@ -11,6 +11,7 @@ import {
   OrchestrationDispatchCommandError,
   ProjectId,
   ProviderInstanceId,
+  ThreadConversationId,
   ThreadId,
 } from "@t3tools/contracts";
 import { AtomRegistry } from "effect/reactivity";
@@ -144,6 +145,18 @@ describe("thread outbox", () => {
     const message: QueuedThreadMessage = {
       ...queuedMessage({ messageId: "queued-switch", createdAt: "2026-09-17T09:00:00.000Z" }),
       dispatchMode: "queue",
+    };
+    expect(
+      decodeQueuedThreadMessage(JSON.parse(JSON.stringify(encodeQueuedThreadMessage(message)))),
+    ).toEqual(message);
+  });
+  it("retains the selected conversation through a persisted offline queue round trip", () => {
+    const message: QueuedThreadMessage = {
+      ...queuedMessage({
+        messageId: "conversation-message",
+        createdAt: "2026-10-16T20:00:00.000Z",
+      }),
+      conversationId: ThreadConversationId.make("conversation-1"),
     };
     expect(
       decodeQueuedThreadMessage(JSON.parse(JSON.stringify(encodeQueuedThreadMessage(message)))),

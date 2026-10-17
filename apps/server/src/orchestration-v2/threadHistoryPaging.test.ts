@@ -3,6 +3,7 @@ import {
   NodeId,
   RunId,
   ThreadId,
+  ThreadConversationId,
   TurnItemId,
   type OrchestrationV2ProjectedTurnItem,
   type OrchestrationV2TurnItem,
@@ -527,6 +528,64 @@ describe("threadHistoryPaging", () => {
     expect(bounded.projection.turnItems.some((item) => item.type === "run_interrupt_result")).toBe(
       false,
     );
+  });
+
+  it("retains the nearest conversation anchor when a bounded window starts mid-run", () => {
+    const conversationId = ThreadConversationId.make("conversation-build");
+    const anchorBase = makeRow(0);
+    const anchor = {
+      ...anchorBase,
+      item: {
+        ...anchorBase.item,
+        type: "user_message" as const,
+        runId: RUN,
+        createdBy: "user" as const,
+        creationSource: "web" as const,
+        inputIntent: "turn_start" as const,
+        messageId: MessageId.make("message-build"),
+        conversationIds: [conversationId],
+        text: "Build it",
+        attachments: [],
+      },
+    } as OrchestrationV2ProjectedTurnItem;
+    const middle = {
+      ...makeRow(1),
+      item: { ...makeRow(1).item, runId: RUN },
+    } as OrchestrationV2ProjectedTurnItem;
+    const recent = {
+      ...makeRow(2),
+      item: { ...makeRow(2).item, runId: RUN },
+    } as OrchestrationV2ProjectedTurnItem;
+    const base = makeProjection([anchor, middle, recent]);
+    const projection = {
+      ...base,
+      thread: {
+        ...base.thread,
+        conversations: [
+          {
+            id: conversationId,
+            title: "Build",
+            goal: null,
+            state: { status: "active" as const },
+            createdAt: "2026-10-16T12:00:00.000Z",
+            updatedAt: "2026-10-16T12:00:00.000Z",
+          },
+        ],
+      },
+    };
+    const bounded = buildBoundedThreadProjection({
+      projection,
+      snapshotSequence: 5,
+      policy: { maxItems: 1, maxEncodedBytes: 10_000_000 },
+    });
+
+    expect(bounded.projection.visibleTurnItems.map((row) => String(row.sourceItemId))).toEqual([
+      "item-2",
+    ]);
+    expect(bounded.projection.turnItems.map((item) => String(item.id)).sort()).toEqual([
+      "item-0",
+      "item-2",
+    ]);
   });
 
   it("charges local row.item duplication when measuring bounded timeline bytes", () => {

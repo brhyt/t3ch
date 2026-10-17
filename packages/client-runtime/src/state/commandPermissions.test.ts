@@ -1,4 +1,4 @@
-import { requestGuarded, runStreamGuarded } from "../rpc/client.ts";
+import { requestGuarded, RpcPermissionGuard, runStreamGuarded } from "../rpc/client.ts";
 import { EnvironmentSupervisor } from "../connection/supervisor.ts";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as Option from "effect/Option";
@@ -14,6 +14,7 @@ import {
   EnvironmentId,
   ScheduledTaskId,
   WS_METHODS,
+  ORCHESTRATION_V2_WS_METHODS,
   type AuthSessionState,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -24,7 +25,7 @@ import * as TestClock from "effect/testing/TestClock";
 import { Atom, AtomRegistry, AsyncResult } from "effect/reactivity";
 import { EnvironmentRegistry } from "../connection/registry.ts";
 import { createCommandPermissions } from "./commandPermissions.ts";
-import { createEnvironmentRpcCommand } from "./runtime.ts";
+import { createEnvironmentCommand, createEnvironmentRpcCommand } from "./runtime.ts";
 
 vi.mock("./session.ts", () => ({
   createEnvironmentSessionAtoms: () => ({ sessionStateAtom: sessions }),
@@ -59,6 +60,55 @@ const setup = Effect.gen(function* () {
 });
 
 describe("command permissions", () => {
+  it("provides the destination guard to high-level environment commands", async () => {
+    const registry = AtomRegistry.make();
+    const unmount = registry.mount(sessions(env));
+    const command = createEnvironmentCommand(runtime, {
+      label: "test.high-level-command",
+      execute: () =>
+        RpcPermissionGuard.pipe(
+          Effect.flatMap((guard) =>
+            guard.authorize(env, ORCHESTRATION_V2_WS_METHODS.dispatchCommand, {}),
+          ),
+          Effect.as("sent"),
+        ),
+    });
+    const target = { environmentId: env, input: undefined };
+    try {
+      registry.set(sessions(env), AsyncResult.success(grant(false)));
+      expect((await command.run(registry, target))._tag).toBe("Failure");
+
+      registry.set(sessions(env), AsyncResult.success(grant(true)));
+      const allowed = await command.run(registry, target);
+      expect(allowed._tag).toBe("Success");
+      if (allowed._tag === "Success") expect(allowed.value).toBe("sent");
+    } finally {
+      unmount();
+      registry.dispose();
+    }
+  });
+
+  it.effect("requires the destination orchestration grant for conversation mutations", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const command = createCommandPermissions(
+          runtime,
+          ORCHESTRATION_V2_WS_METHODS.dispatchCommand,
+        );
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        expect(registry.get(command.permissionAtom(env))).toBe(false);
+        expect((yield* command.authorize(registry, env).pipe(Effect.flip))._tag).toBe(
+          "EnvironmentAuthorizationError",
+        );
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        expect(registry.get(command.permissionAtom(env))).toBe(true);
+        yield* command.authorize(registry, env);
+        registry.set(sessions(other), AsyncResult.success(grant(false)));
+        expect(registry.get(command.permissionAtom(other))).toBe(false);
+      }),
+    ),
+  );
   it.effect("requires the destination settings grant to run storage cleanup", () =>
     Effect.scoped(
       Effect.gen(function* () {

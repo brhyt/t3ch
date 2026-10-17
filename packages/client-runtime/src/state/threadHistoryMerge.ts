@@ -74,13 +74,14 @@ export function mergeOlderHistoryIntoProjection(
       const currentItem = turnItemById.get(String(row.sourceItemId));
       if (currentItem !== undefined) {
         if (
-          currentItem.type !== "run_interrupt_request" ||
-          !isOrchestrationV2TurnItemVisible({
-            item: currentItem,
-            runs: projection.runs,
-            attempts: projection.attempts,
-            items: projection.turnItems,
-          })
+          currentItem.type !== "user_message" &&
+          (currentItem.type !== "run_interrupt_request" ||
+            !isOrchestrationV2TurnItemVisible({
+              item: currentItem,
+              runs: projection.runs,
+              attempts: projection.attempts,
+              items: projection.turnItems,
+            }))
         )
           continue;
         row = { ...row, item: currentItem };
