@@ -2889,6 +2889,33 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                     )
                     AND request.type = 'run_interrupt_request'
                   UNION
+                  SELECT anchor.rowid, anchor.ordinal, anchor.turn_item_id
+                  FROM (
+                    SELECT run_id, MIN(ordinal) AS first_ordinal
+                    FROM selected
+                    WHERE run_id IS NOT NULL
+                    GROUP BY run_id
+                  ) AS cohort
+                  CROSS JOIN orchestration_v2_projection_turn_items AS anchor
+                    ON anchor.rowid = (
+                      SELECT candidate.rowid
+                      FROM orchestration_v2_projection_turn_items AS candidate
+                      WHERE candidate.thread_id = ${threadId}
+                        AND candidate.run_id = cohort.run_id
+                        AND candidate.type = 'user_message'
+                        AND candidate.ordinal <= cohort.first_ordinal
+                      ORDER BY candidate.ordinal DESC
+                      LIMIT 1
+                    )
+                  WHERE json_array_length(
+                    COALESCE(
+                      (SELECT json_extract(payload_json, '$.conversations')
+                       FROM orchestration_v2_projection_threads
+                       WHERE thread_id = ${threadId}),
+                      '[]'
+                    )
+                  ) > 0
+                  UNION
                   SELECT latest.item_rowid, latest.ordinal, latest.turn_item_id
                   FROM (
                     SELECT rowid AS item_rowid, ordinal, turn_item_id

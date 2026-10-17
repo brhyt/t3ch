@@ -367,6 +367,35 @@ function retainedInterruptRequestTurnItems(
   return retained;
 }
 
+function retainedConversationAnchorTurnItems(
+  projection: OrchestrationV2ThreadProjection,
+  visible: ReadonlyArray<OrchestrationV2ProjectedTurnItem>,
+): OrchestrationV2TurnItem[] {
+  if ((projection.thread.conversations?.length ?? 0) === 0) return [];
+
+  const firstVisibleOrdinalByRun = new Map<string, number>();
+  for (const row of visible) {
+    const runId = row.item.runId;
+    if (runId === null || runId === undefined || !isLocalProjectedRow(projection, row)) continue;
+    const existing = firstVisibleOrdinalByRun.get(String(runId));
+    if (existing === undefined || row.item.ordinal < existing) {
+      firstVisibleOrdinalByRun.set(String(runId), row.item.ordinal);
+    }
+  }
+
+  const anchors = new Map<string, Extract<OrchestrationV2TurnItem, { type: "user_message" }>>();
+  for (const item of projection.turnItems) {
+    if (item.type !== "user_message" || item.runId === null) continue;
+    const firstVisibleOrdinal = firstVisibleOrdinalByRun.get(String(item.runId));
+    if (firstVisibleOrdinal === undefined || item.ordinal > firstVisibleOrdinal) continue;
+    const existing = anchors.get(String(item.runId));
+    if (existing === undefined || item.ordinal > existing.ordinal) {
+      anchors.set(String(item.runId), item);
+    }
+  }
+  return [...anchors.values()];
+}
+
 function localTurnItemsForVisibleWindow(
   projection: OrchestrationV2ThreadProjection,
   visible: ReadonlyArray<OrchestrationV2ProjectedTurnItem>,
@@ -509,6 +538,9 @@ export function buildBoundedThreadProjection(input: {
     turnItemById.set(String(item.id), item);
   }
   for (const item of dependencyTurnItems) {
+    turnItemById.set(String(item.id), item);
+  }
+  for (const item of retainedConversationAnchorTurnItems(controlProjection, visibleTurnItems)) {
     turnItemById.set(String(item.id), item);
   }
   const turnItems = [...turnItemById.values()];

@@ -977,6 +977,19 @@ function ThreadRouteContent(
           feedbackSubmissions={composer.feedbackSubmissions}
           onDismissFeedback={composer.dismissFeedback}
           selectedThreadFeed={composer.selectedThreadFeed}
+          threadConversations={
+            composer.supportsThreadConversations
+              ? {
+                  conversations: composer.conversations,
+                  selectedId: composer.selectedConversationId,
+                  onSelect: composer.setSelectedConversationId,
+                  onCreate: composer.onCreateConversation,
+                  onRename: composer.onRenameConversation,
+                  onUpdateState: composer.onUpdateConversationState,
+                  onAssignLatest: composer.onAssignLatestExchange,
+                }
+              : undefined
+          }
           pendingHandoff={composer.pendingHandoff}
           activityRun={composer.selectedThreadActivityRun}
           activeWorkStartedAt={

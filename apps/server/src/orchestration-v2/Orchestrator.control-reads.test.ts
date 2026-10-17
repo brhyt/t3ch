@@ -16,6 +16,7 @@ import {
   RunId,
   RuntimeRequestId,
   ThreadId,
+  ThreadConversationId,
   TurnItemId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
@@ -50,6 +51,241 @@ const layerTest = Layer.mergeAll(
     ProviderAdapterRegistry.layerFromAdapters([adapter]),
     { databaseLayer: layerDatabase, runEffectWorker: false },
   ),
+);
+
+it.effect("persists conversation metadata and membership on both exchange records", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const sql = yield* SqlClient.SqlClient;
+    const threadId = ThreadId.make("thread:conversations");
+    const messageId = MessageId.make("message:conversation");
+    const buildId = ThreadConversationId.make("conversation:build");
+    const reviewId = ThreadConversationId.make("conversation:review");
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-conversation-thread"),
+      threadId,
+      projectId: ProjectId.make("project:conversations"),
+      title: "Conversations",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    for (const [id, title] of [
+      [buildId, "Build"],
+      [reviewId, "Review"],
+    ] as const) {
+      yield* orchestrator.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make(`create-${id}`),
+        threadId,
+        conversationMutation: { type: "create", id, title },
+      });
+    }
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make("dispatch-conversation-message"),
+      threadId,
+      messageId,
+      conversationId: buildId,
+      text: "Implement this",
+      attachments: [],
+      dispatchMode: { type: "start_immediately" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+    const dispatchedProjection = yield* projections.getThreadProjection(threadId);
+    const runId = dispatchedProjection.runs[0]!.id;
+    const anchorOrdinal = dispatchedProjection.turnItems[0]!.ordinal;
+    const nowForHistory = yield* DateTime.now;
+    for (const offset of [1, 2]) {
+      const ordinal = anchorOrdinal + offset;
+      yield* projections.apply({
+        id: EventId.make(`event:conversation:command:${offset}`),
+        type: "turn-item.updated",
+        threadId,
+        runId,
+        occurredAt: nowForHistory,
+        payload: {
+          id: TurnItemId.make(`item:conversation:command:${offset}`),
+          threadId,
+          runId,
+          nodeId: null,
+          providerThreadId: null,
+          providerTurnId: null,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal,
+          status: "completed",
+          title: `Command ${offset}`,
+          input: "true",
+          output: "done",
+          exitCode: 0,
+          startedAt: nowForHistory,
+          completedAt: nowForHistory,
+          updatedAt: nowForHistory,
+          type: "command_execution",
+        },
+      });
+    }
+    const boundedSqlProjection = yield* projections.getThreadSnapshotWindow(threadId, {
+      rowLimit: 1,
+    });
+    assert.sameMembers(
+      (yield* projections.getThreadProjection(threadId)).turnItems.map((item) => String(item.id)),
+      [
+        String(dispatchedProjection.turnItems[0]!.id),
+        "item:conversation:command:1",
+        "item:conversation:command:2",
+      ],
+    );
+    assert.sameMembers(
+      boundedSqlProjection.projection.turnItems.map((item) => String(item.id)),
+      [String(dispatchedProjection.turnItems[0]!.id), "item:conversation:command:2"],
+    );
+    const updatedAtBeforeAssignment = (yield* projections.getThreadProjection(threadId)).thread
+      .updatedAt;
+    const assignCommand = {
+      type: "thread.metadata.update",
+      commandId: CommandId.make("assign-conversation-message"),
+      threadId,
+      conversationMutation: {
+        type: "assign",
+        messageIds: [messageId],
+        conversationIds: [buildId, reviewId],
+      },
+    } as const;
+    const assigned = yield* orchestrator.dispatch(assignCommand);
+    const replayedAssignment = yield* orchestrator.dispatch(assignCommand);
+    assert.equal(replayedAssignment.sequence, assigned.sequence);
+    assert.deepEqual(replayedAssignment.storedEvents, assigned.storedEvents);
+    assert.sameMembers(
+      assigned.storedEvents.map(({ event }) => event.type),
+      ["message.updated", "turn-item.updated", "thread.metadata-updated"],
+    );
+    const assignedTurnItem = assigned.storedEvents.find(
+      ({ event }) => event.type === "turn-item.updated",
+    )?.event;
+    assert.deepEqual(
+      assignedTurnItem?.type === "turn-item.updated" &&
+        assignedTurnItem.payload.type === "user_message"
+        ? assignedTurnItem.payload.conversationIds
+        : undefined,
+      [buildId, reviewId],
+    );
+
+    const projection = yield* projections.getThreadProjection(threadId);
+    const persistedItems = yield* sql<{ readonly payload_json: string }>`
+      SELECT payload_json FROM orchestration_v2_projection_turn_items
+      WHERE thread_id = ${threadId} AND type = 'user_message'
+    `;
+    assert.include(persistedItems[0]!.payload_json, "conversation:build");
+    assert.deepEqual(
+      projection.thread.conversations?.map(({ id, title }) => ({ id, title })),
+      [
+        { id: buildId, title: "Build" },
+        { id: reviewId, title: "Review" },
+      ],
+    );
+    assert.deepEqual(
+      projection.messages.find((message) => message.id === messageId)?.conversationIds,
+      [buildId, reviewId],
+    );
+    const userItem = projection.turnItems.find(
+      (
+        item,
+      ): item is Extract<
+        (typeof projection.turnItems)[number],
+        { readonly type: "user_message" }
+      > => item.type === "user_message" && item.messageId === messageId,
+    );
+    assert.deepEqual(userItem?.conversationIds, [buildId, reviewId]);
+    assert.equal(
+      projection.messages.find((message) => message.id === messageId)?.text,
+      "Implement this",
+    );
+    assert.deepEqual(projection.thread.updatedAt, updatedAtBeforeAssignment);
+
+    yield* orchestrator.dispatch({
+      type: "thread.metadata.update",
+      commandId: CommandId.make("complete-build-conversation"),
+      threadId,
+      conversationMutation: {
+        type: "update",
+        id: buildId,
+        state: { status: "completed" },
+      },
+    });
+    assert.equal(
+      (yield* projections.getThreadProjection(threadId)).thread.conversations?.[0]?.state.status,
+      "completed",
+    );
+    yield* orchestrator.dispatch({
+      type: "thread.metadata.update",
+      commandId: CommandId.make("reopen-build-conversation"),
+      threadId,
+      conversationMutation: { type: "update", id: buildId, state: { status: "active" } },
+    });
+    assert.equal(
+      (yield* projections.getThreadProjection(threadId)).thread.conversations?.[0]?.state.status,
+      "active",
+    );
+
+    const assistantMessageId = MessageId.make("message:conversation:evidence");
+    const now = yield* DateTime.now;
+    yield* projections.apply({
+      id: EventId.make("event:conversation:evidence"),
+      type: "message.updated",
+      threadId,
+      occurredAt: now,
+      payload: {
+        id: assistantMessageId,
+        threadId,
+        runId: null,
+        nodeId: null,
+        role: "assistant",
+        text: "Choose the release strategy.",
+        attachments: [],
+        streaming: false,
+        createdBy: "agent",
+        creationSource: "provider",
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    yield* orchestrator.dispatch({
+      type: "thread.metadata.update",
+      commandId: CommandId.make("decision-build-conversation"),
+      threadId,
+      conversationMutation: {
+        type: "update",
+        id: buildId,
+        state: {
+          status: "decision_needed",
+          question: "Which release strategy?",
+          sourceMessageId: assistantMessageId,
+        },
+      },
+    });
+    const invalidAssignment = yield* orchestrator
+      .dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make("assign-assistant-conversation"),
+        threadId,
+        conversationMutation: {
+          type: "assign",
+          messageIds: [assistantMessageId],
+          conversationIds: [buildId],
+        },
+      })
+      .pipe(Effect.flip);
+    assert.include(String(invalidAssignment.cause), "User message");
+  }).pipe(Effect.provide(layerTest)),
 );
 
 it.effect(
