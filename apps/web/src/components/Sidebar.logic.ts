@@ -1353,3 +1353,21 @@ export function sortScopedProjectsForSidebar<
       left.id.localeCompare(right.id),
   );
 }
+
+export function visibleSidebarListItems(
+  items: readonly SidebarListItem[],
+  pinnedExpanded: boolean,
+  routeThreadKey: string | null,
+  sections: { pinned: boolean; active: boolean },
+): readonly SidebarListItem[] {
+  if (pinnedExpanded && sections.pinned && sections.active) return items;
+  let pinnedCount = 0;
+  return items.filter((item) => {
+    if (item.kind !== "thread") return true;
+    if (item.section === "active") return sections.active;
+    if (item.section !== "pinned") return true;
+    if (!sections.pinned) return false;
+    pinnedCount += 1;
+    return pinnedExpanded || pinnedCount <= 5 || item.key === routeThreadKey;
+  });
+}
