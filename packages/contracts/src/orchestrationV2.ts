@@ -1,4 +1,10 @@
 import { OrchestrationMessageContext } from "./composerContext.ts";
+import { ThreadConversationId } from "./baseSchemas.ts";
+import {
+  ThreadConversation,
+  ThreadConversationIds,
+  ThreadConversationMutation,
+} from "./threadConversations.ts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
@@ -354,6 +360,7 @@ export const OrchestrationV2LimitRecoveryUpdate = Schema.Struct({
 export type OrchestrationV2LimitRecoveryUpdate = typeof OrchestrationV2LimitRecoveryUpdate.Type;
 
 export const OrchestrationV2AppThread = Schema.Struct({
+  conversations: Schema.optional(Schema.Array(ThreadConversation).check(Schema.isMaxLength(100))),
   ...OrchestrationV2CreationFields,
   id: ThreadId,
   projectId: ProjectId,
@@ -1078,6 +1085,7 @@ export const OrchestrationV2Notification = Schema.Struct({
 export type OrchestrationV2Notification = typeof OrchestrationV2Notification.Type;
 
 export const OrchestrationV2ConversationMessage = Schema.Struct({
+  conversationIds: Schema.optional(ThreadConversationIds),
   notification: Schema.optional(OrchestrationV2Notification),
   ...OrchestrationV2CreationFields,
   scheduledTaskId: Schema.optional(ScheduledTaskId),
@@ -1329,6 +1337,7 @@ export const OrchestrationV2TurnItem = Schema.Union([
     ...OrchestrationV2TurnItemBaseFields,
     ...OrchestrationV2CreationFields,
     type: Schema.Literal("user_message"),
+    conversationIds: Schema.optional(ThreadConversationIds),
     messageId: MessageId,
     scheduledTaskId: Schema.optional(ScheduledTaskId),
     senderThreadId: Schema.optional(ThreadId),
@@ -2085,6 +2094,7 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     ...OrchestrationV2CreationFields,
     type: Schema.Literal("user_message"),
     messageId: MessageId,
+    conversationIds: Schema.optional(ThreadConversationIds),
     scheduledTaskId: Schema.optional(ScheduledTaskId),
     senderThreadId: Schema.optional(ThreadId),
     inputIntent: OrchestrationV2UserMessageInputIntent,
@@ -2655,6 +2665,7 @@ export const OrchestrationV2Command = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("thread.metadata.update"),
+    conversationMutation: Schema.optional(ThreadConversationMutation),
     commandId: CommandId,
     threadId: ThreadId,
     title: Schema.optional(TrimmedNonEmptyString),
@@ -2751,6 +2762,7 @@ export const OrchestrationV2Command = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("message.dispatch"),
+    conversationId: Schema.optional(ThreadConversationId),
     notification: Schema.optional(OrchestrationV2Notification),
     ...OrchestrationV2CreationFields,
     scheduledTaskId: Schema.optional(ScheduledTaskId),
@@ -3138,6 +3150,7 @@ export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
   initialMessage: Schema.optional(
     Schema.Struct({
       messageId: Schema.optional(MessageId),
+      conversationId: Schema.optional(ThreadConversationId),
       text: Schema.String,
       context: Schema.optional(OrchestrationMessageContext),
       attachments: Schema.Array(ChatAttachment),

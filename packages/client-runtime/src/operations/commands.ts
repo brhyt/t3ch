@@ -33,7 +33,7 @@ import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 
-import { getInitialServerConfig, request } from "../rpc/client.ts";
+import { getInitialServerConfig, request, requestGuarded } from "../rpc/client.ts";
 
 interface CommandMetadata {
   readonly commandId?: CommandId;
@@ -159,6 +159,7 @@ interface StartThreadBootstrap {
 }
 
 export interface StartThreadTurnInput extends ThreadCommandInput {
+  readonly conversationId?: import("@t3tools/contracts").ThreadConversationId;
   readonly manualContinuationOfRunId?: RunId;
   readonly message: {
     readonly messageId: MessageId;
@@ -260,7 +261,7 @@ const allocateCommandId = Effect.fn("EnvironmentCommands.allocateCommandId")(fun
 });
 
 const dispatch = (command: OrchestrationV2Command) =>
-  request(ORCHESTRATION_V2_WS_METHODS.dispatchCommand, command);
+  requestGuarded(ORCHESTRATION_V2_WS_METHODS.dispatchCommand, command);
 
 const getProjection = (threadId: ThreadId) =>
   request(ORCHESTRATION_V2_WS_METHODS.getThreadProjection, { threadId });
@@ -672,6 +673,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
       interactionMode: input.interactionMode,
       workspaceStrategy,
       initialMessage: {
+        ...(input.conversationId === undefined ? {} : { conversationId: input.conversationId }),
         messageId: input.message.messageId,
         text: input.message.text,
         ...(context ? { context } : {}),
@@ -684,6 +686,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
   if (requestedMode === "start") {
     return yield* dispatch({
       type: "message.dispatch",
+      ...(input.conversationId === undefined ? {} : { conversationId: input.conversationId }),
       commandId,
       createdBy: "user",
       creationSource: input.creationSource ?? "web",
@@ -748,6 +751,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
     (serverResolvesCommandContext || projection?.messages.length === 0);
   return yield* dispatch({
     type: "message.dispatch",
+    ...(input.conversationId === undefined ? {} : { conversationId: input.conversationId }),
     commandId,
     createdBy: "user",
     creationSource: input.creationSource ?? "web",

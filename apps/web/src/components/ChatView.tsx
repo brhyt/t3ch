@@ -74,6 +74,8 @@ import {
   type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
   type ThreadId,
+  type ThreadConversationId,
+  type ThreadConversationMutation,
   type ThreadLinkedPullRequest,
   type RunId,
   type RuntimeRequestId,
@@ -87,6 +89,7 @@ import {
   TerminalOpenInput,
   type WorktreeSetupSnapshot,
 } from "@t3tools/contracts";
+import { filterConversationTurnItems } from "@t3tools/client-runtime/thread-conversations";
 import { type EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
 import { deriveThreadTitleSeed } from "@t3tools/client-runtime/operations";
 import {
@@ -422,6 +425,7 @@ import {
 } from "../state/server";
 import { terminalEnvironment } from "../state/terminal";
 import { threadEnvironment } from "../state/threads";
+import { orchestrationEnvironment } from "../state/orchestration";
 import { workspacePreparationRetryRunIds } from "@t3tools/client-runtime/state/turn-item-presentation";
 import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
 import { vcsEnvironment } from "../state/vcs";
@@ -452,6 +456,10 @@ import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import type { AssistantCitationRequest } from "./chat/AssistantCitationSource";
 import { MessagesTimeline, type MessagesTimelineHistoryControls } from "./chat/MessagesTimeline";
+import {
+  ThreadConversationsBar,
+  type AssignableConversationExchange,
+} from "./chat/ThreadConversationsBar";
 import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
 import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import { resolveTimelineIsAtEnd, worktreeSetupAgentStarted } from "./chat/MessagesTimeline.logic";
@@ -1707,6 +1715,12 @@ export default function ChatView(props: ChatViewProps) {
   const startThreadTurn = useOrchestrationCommand(threadEnvironment.startTurn, {
     reportFailure: false,
   });
+  const dispatchConversationCommand = useAtomCommand(orchestrationEnvironment.v2.dispatchCommand, {
+    reportFailure: false,
+  });
+  const canDispatchConversationCommand = useAtomValue(
+    orchestrationEnvironment.v2.dispatchCommand.permissionAtom(environmentId),
+  );
   const resumeThreadQueue = useOrchestrationCommand(threadEnvironment.resumeThreadQueue, {
     reportFailure: false,
   });
@@ -3011,6 +3025,96 @@ export default function ChatView(props: ChatViewProps) {
     attachmentEnvironmentConfig?.environment.capabilities.questionAttachments === true;
   const supportsAttachmentUploads =
     attachmentEnvironmentConfig?.environment.capabilities.attachmentUploads === true;
+  const supportsThreadConversations =
+    isServerThread && serverConfig?.environment.capabilities.threadConversations === true;
+  const threadConversations = serverProjection?.thread.conversations ?? [];
+  const [conversationSelection, setConversationSelection] = useState<{
+    readonly threadKey: string;
+    readonly conversationId: ThreadConversationId | null;
+  }>({ threadKey: routeThreadKey, conversationId: null });
+  const selectedConversationId =
+    supportsThreadConversations && conversationSelection.threadKey === routeThreadKey
+      ? conversationSelection.conversationId
+      : null;
+  const displayedServerTurnItems = useMemo(
+    () =>
+      filterConversationTurnItems(
+        serverVisibleTurnItems,
+        selectedConversationId,
+        serverProjection?.turnItems ?? [],
+      ),
+    [selectedConversationId, serverProjection?.turnItems, serverVisibleTurnItems],
+  );
+  const displayedOptimisticUserMessages = useMemo(
+    () =>
+      selectedConversationId === null
+        ? optimisticUserMessages
+        : optimisticUserMessages.filter((message) =>
+            message.conversationIds?.includes(selectedConversationId),
+          ),
+    [optimisticUserMessages, selectedConversationId],
+  );
+  const assignableConversationExchanges = useMemo<ReadonlyArray<AssignableConversationExchange>>(
+    () =>
+      serverVisibleTurnItems.flatMap(({ item }) =>
+        item.type === "user_message" && item.createdBy === "user"
+          ? [
+              {
+                id: item.messageId,
+                text: item.text,
+                conversationIds: item.conversationIds ?? [],
+              },
+            ]
+          : [],
+      ),
+    [serverVisibleTurnItems],
+  );
+  const [conversationMutationError, setConversationMutationError] = useState<string | null>(null);
+
+  const selectConversation = (conversationId: ThreadConversationId | null) => {
+    setConversationMutationError(null);
+    setConversationSelection({ threadKey: routeThreadKey, conversationId });
+  };
+  const selectConversationStable = useStableCallback(selectConversation);
+
+  const mutateConversation = async (conversationMutation: ThreadConversationMutation) => {
+    if (!activeThread || !supportsThreadConversations || !canDispatchConversationCommand) {
+      setConversationMutationError("Conversation changes are unavailable for this environment.");
+      return false;
+    }
+    setConversationMutationError(null);
+    const result = await dispatchConversationCommand({
+      environmentId: activeThread.environmentId,
+      input: {
+        type: "thread.metadata.update",
+        commandId: CommandId.make(randomUUID()),
+        threadId: activeThread.id,
+        conversationMutation,
+      },
+    });
+    if (result._tag === "Failure") {
+      const error = squashAtomCommandFailure(result);
+      setConversationMutationError(
+        error instanceof Error ? error.message : "Could not update the conversation.",
+      );
+      return false;
+    }
+    if (conversationMutation.type === "create") {
+      setConversationSelection({
+        threadKey: routeThreadKey,
+        conversationId: conversationMutation.id,
+      });
+    }
+    return true;
+  };
+  const mutateConversationStable = useStableCallback(mutateConversation);
+
+  const openConversationEvidence = (messageId: MessageId) => {
+    if (activeThreadKey === null) return;
+    setConversationSelection({ threadKey: routeThreadKey, conversationId: null });
+    requestAnimationFrame(() => setTimelineAnchor({ threadKey: activeThreadKey, messageId }));
+  };
+  const openConversationEvidenceStable = useStableCallback(openConversationEvidence);
   const advertisedFileAttachmentBytes =
     attachmentEnvironmentConfig?.environment.capabilities.fileAttachments?.maxUploadBytes ?? null;
   const maxFileAttachmentBytes =
@@ -3885,9 +3989,9 @@ export default function ChatView(props: ChatViewProps) {
     const previous = timelineProjectionRef.current;
     const projection = deriveTimelineEntriesFromVisibleTurnItemsWithState(
       {
-        visibleTurnItems: serverVisibleTurnItems,
-        optimisticMessages: optimisticUserMessages,
-        anchoredMessages: anchoredTimelineMessages,
+        visibleTurnItems: displayedServerTurnItems,
+        optimisticMessages: displayedOptimisticUserMessages,
+        anchoredMessages: selectedConversationId === null ? anchoredTimelineMessages : [],
         attachmentUrlById: timelineAttachmentUrlById,
         ...(serverProjection === null
           ? {}
@@ -3904,8 +4008,9 @@ export default function ChatView(props: ChatViewProps) {
   }, [
     activeThreadKey,
     anchoredTimelineMessages,
-    optimisticUserMessages,
-    serverVisibleTurnItems,
+    displayedOptimisticUserMessages,
+    displayedServerTurnItems,
+    selectedConversationId,
     serverProjection,
     timelineAttachmentUrlById,
   ]);
@@ -8357,6 +8462,7 @@ export default function ChatView(props: ChatViewProps) {
     },
   ) => {
     e?.preventDefault();
+    const conversationIdForSend = selectedConversationId;
     if (
       usageLimitsOffered &&
       usageLimitsKey !== null &&
@@ -8746,6 +8852,7 @@ export default function ChatView(props: ChatViewProps) {
           threadContexts: composerThreadContexts,
         }),
         interactionMode: followUp.interactionMode,
+        conversationId: conversationIdForSend,
       });
       if (!followUpSent) {
         promptRef.current = followUpPromptSnapshot;
@@ -9380,6 +9487,7 @@ export default function ChatView(props: ChatViewProps) {
         createdAt: messageCreatedAt,
         updatedAt: messageCreatedAt,
         streaming: false,
+        ...(conversationIdForSend === null ? {} : { conversationIds: [conversationIdForSend] }),
         ...(shouldQueueBehindActiveRun
           ? { inputIntent: "queued_turn" as const }
           : phase === "running" && dispatchMode === "steer"
@@ -9558,6 +9666,7 @@ export default function ChatView(props: ChatViewProps) {
           runtimeMode,
           interactionMode: sendInteractionMode,
           dispatchMode: turnDispatchMode,
+          ...(conversationIdForSend === null ? {} : { conversationId: conversationIdForSend }),
           ...(bootstrap ? { bootstrap } : {}),
           createdAt: messageCreatedAt,
         },
@@ -9951,10 +10060,12 @@ export default function ChatView(props: ChatViewProps) {
     text,
     context,
     interactionMode: nextInteractionMode,
+    conversationId,
   }: {
     text: string;
     context?: ReturnType<typeof buildMessageContext>;
     interactionMode: "default" | "plan";
+    conversationId: ThreadConversationId | null;
   }) {
     if (
       !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope) ||
@@ -10023,6 +10134,7 @@ export default function ChatView(props: ChatViewProps) {
         createdAt: messageCreatedAt,
         updatedAt: messageCreatedAt,
         streaming: false,
+        ...(conversationId === null ? {} : { conversationIds: [conversationId] }),
       },
     ]);
 
@@ -10057,6 +10169,7 @@ export default function ChatView(props: ChatViewProps) {
           titleSeed: activeThread.title,
           runtimeMode,
           interactionMode: nextInteractionMode,
+          ...(conversationId === null ? {} : { conversationId }),
           ...(nextInteractionMode === "default" && activeProposedPlan
             ? {
                 sourceProposedPlan: {
@@ -10877,6 +10990,19 @@ export default function ChatView(props: ChatViewProps) {
               : {})}
           />
         </header>
+
+        {supportsThreadConversations ? (
+          <ThreadConversationsBar
+            conversations={threadConversations}
+            selectedId={selectedConversationId}
+            exchanges={assignableConversationExchanges}
+            canManage={canOperateThread && canDispatchConversationCommand}
+            error={conversationMutationError}
+            onSelect={selectConversationStable}
+            onMutate={mutateConversationStable}
+            onOpenEvidence={openConversationEvidenceStable}
+          />
+        ) : null}
 
         <div className="relative flex min-h-0 min-w-0 flex-1">
           <ThreadFindCanvas
