@@ -29,6 +29,9 @@ import {
   type OrchestrationV2ServerCommand,
   type ThreadPullRequestLink,
   type ThreadPullRequestWatch,
+  type ThreadConversation,
+  type ThreadConversationId,
+  type ThreadConversationMutation,
   type OrchestrationV2AppThread,
   type OrchestrationV2ContextHandoff,
   type OrchestrationV2ContextSourcePoint,
@@ -140,6 +143,57 @@ import {
 import { planThreadDeletion } from "./ThreadDeletion.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ServerSettings from "../serverSettings.ts";
+
+function conversationIdsForMessage(input: {
+  readonly existingMessage?: Pick<OrchestrationV2ConversationMessage, "conversationIds">;
+  readonly conversationId?: ThreadConversationId;
+}): ReadonlyArray<ThreadConversationId> {
+  return (
+    input.existingMessage?.conversationIds ??
+    (input.conversationId === undefined ? [] : [input.conversationId])
+  );
+}
+
+function applyConversationMutation(input: {
+  readonly conversations: ReadonlyArray<ThreadConversation>;
+  readonly mutation: Exclude<ThreadConversationMutation, { readonly type: "assign" }>;
+  readonly now: string;
+}): ReadonlyArray<ThreadConversation> | string {
+  const existing = input.conversations.find(
+    (conversation) => conversation.id === input.mutation.id,
+  );
+  switch (input.mutation.type) {
+    case "create":
+      if (existing !== undefined) return `Conversation ${input.mutation.id} already exists.`;
+      if (input.conversations.length >= 100) return "A thread can have at most 100 conversations.";
+      return [
+        ...input.conversations,
+        {
+          id: input.mutation.id,
+          title: input.mutation.title,
+          goal: input.mutation.goal ?? null,
+          state: input.mutation.state ?? { status: "active" },
+          createdAt: input.now,
+          updatedAt: input.now,
+        },
+      ];
+    case "update": {
+      if (existing === undefined) return `Conversation ${input.mutation.id} does not exist.`;
+      const mutation = input.mutation;
+      return input.conversations.map((conversation) =>
+        conversation.id === mutation.id
+          ? {
+              ...conversation,
+              ...(mutation.title === undefined ? {} : { title: mutation.title }),
+              ...(mutation.goal === undefined ? {} : { goal: mutation.goal }),
+              ...(mutation.state === undefined ? {} : { state: mutation.state }),
+              updatedAt: input.now,
+            }
+          : conversation,
+      );
+    }
+  }
+}
 
 export class OrchestratorDispatchError extends Schema.TaggedError<OrchestratorDispatchError>()(
   "OrchestratorDispatchError",
@@ -1644,6 +1698,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           status: "completed",
           title: null,
           type: "user_message",
+          ...(queuedMessage.conversationIds === undefined
+            ? {}
+            : { conversationIds: queuedMessage.conversationIds }),
           messageId: queuedMessage.id,
           text: queuedMessage.text,
           attachments: queuedMessage.attachments,
@@ -2811,6 +2868,101 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
       markUnreadVisitedAt = DateTime.subtract(latestRunCompletedAt, { milliseconds: 1 });
     }
+    let conversationAssignment:
+      | {
+          readonly conversationIds: ReadonlyArray<ThreadConversationId>;
+          readonly messages: ReadonlyArray<OrchestrationV2ConversationMessage>;
+          readonly turnItems: ReadonlyArray<
+            Extract<OrchestrationV2TurnItem, { readonly type: "user_message" }>
+          >;
+        }
+      | undefined;
+    let mutatedConversations: ReadonlyArray<ThreadConversation> | undefined;
+    if (command.type === "thread.metadata.update" && command.conversationMutation !== undefined) {
+      const mutation = command.conversationMutation;
+      const sourceMessageId =
+        mutation.type !== "assign" &&
+        mutation.state?.status === "decision_needed" &&
+        mutation.state.sourceMessageId !== undefined
+          ? mutation.state.sourceMessageId
+          : undefined;
+      const messageIds =
+        mutation.type === "assign"
+          ? mutation.messageIds
+          : sourceMessageId === undefined
+            ? []
+            : [sourceMessageId];
+      const records =
+        messageIds.length === 0
+          ? undefined
+          : yield* loadProjectionForCommand(
+              command,
+              mutation.type === "assign" ? ["messages", "turnItems"] : ["messages"],
+              {
+                messageIds,
+                ...(mutation.type === "assign" ? { messageRoles: ["user"] as const } : {}),
+                ...(mutation.type === "assign" ? { turnItemTypes: ["user_message"] } : {}),
+              },
+            );
+      const foundMessageIds = new Set(records?.messages.map((message) => message.id) ?? []);
+      const missingMessageId = messageIds.find((messageId) => !foundMessageIds.has(messageId));
+      if (missingMessageId !== undefined) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `${mutation.type === "assign" ? "User message" : "Source message"} ${missingMessageId} does not exist on thread ${command.threadId}.`,
+        });
+      }
+      if (mutation.type === "assign") {
+        const knownConversationIds = new Set(
+          (thread.conversations ?? []).map((conversation) => conversation.id),
+        );
+        const missingConversationId = mutation.conversationIds.find(
+          (conversationId) => !knownConversationIds.has(conversationId),
+        );
+        if (missingConversationId !== undefined) {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: `Conversation ${missingConversationId} does not exist on thread ${command.threadId}.`,
+          });
+        }
+        const turnItems = (records?.turnItems ?? []).filter(
+          (item): item is Extract<OrchestrationV2TurnItem, { readonly type: "user_message" }> =>
+            item.type === "user_message" && foundMessageIds.has(item.messageId),
+        );
+        const foundTurnItemMessageIds = new Set(turnItems.map((item) => item.messageId));
+        const missingTurnItemMessageId = mutation.messageIds.find(
+          (messageId) => !foundTurnItemMessageIds.has(messageId),
+        );
+        if (missingTurnItemMessageId !== undefined) {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: `User message ${missingTurnItemMessageId} has no matching timeline item on thread ${command.threadId}.`,
+          });
+        }
+        conversationAssignment = {
+          conversationIds: mutation.conversationIds,
+          messages: records?.messages ?? [],
+          turnItems,
+        };
+      } else {
+        const next = applyConversationMutation({
+          conversations: thread.conversations ?? [],
+          mutation,
+          now: DateTime.formatIso(now),
+        });
+        if (typeof next === "string") {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: next,
+          });
+        }
+        mutatedConversations = next;
+      }
+    }
     const updatedThread: OrchestrationV2AppThread = (() => {
       switch (command.type) {
         case "thread.archive":
@@ -2945,6 +3097,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                   };
           return {
             ...thread,
+            ...(mutatedConversations === undefined ? {} : { conversations: mutatedConversations }),
             ...(command.title === undefined ? {} : { title: command.title }),
             ...(command.limitRecovery === undefined ? {} : { limitRecovery }),
             ...(command.limitRecovery !== undefined &&
@@ -2997,7 +3150,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               : command.regenerateTitle === false || command.title !== undefined
                 ? { titleRegeneration: null }
                 : {}),
-            updatedAt: now,
+            updatedAt:
+              command.conversationMutation !== undefined &&
+              command.title === undefined &&
+              command.limitRecovery === undefined &&
+              command.branch === undefined &&
+              command.worktreePath === undefined &&
+              command.linkedPullRequest === undefined &&
+              command.regenerateTitle === undefined
+                ? thread.updatedAt
+                : now,
           };
         }
         case "thread.pull-request.link":
@@ -3269,16 +3431,48 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           return "thread.provider-switched" as const;
       }
     })();
-    yield* emit(
-      events,
-      command,
-    )({
-      type: eventType,
-      threadId: command.threadId,
-      providerInstanceId: updatedThread.providerInstanceId,
-      occurredAt: now,
-      payload: updatedThread,
-    });
+    const emitThreadState = () =>
+      emit(
+        events,
+        command,
+      )({
+        type: eventType,
+        threadId: command.threadId,
+        providerInstanceId: updatedThread.providerInstanceId,
+        occurredAt: now,
+        payload: updatedThread,
+      });
+
+    if (conversationAssignment !== undefined) {
+      const emitEvent = emit(events, command);
+      for (const message of conversationAssignment.messages) {
+        yield* emitEvent({
+          type: "message.updated",
+          threadId: command.threadId,
+          ...(message.runId === null ? {} : { runId: message.runId }),
+          ...(message.nodeId === null ? {} : { nodeId: message.nodeId }),
+          providerInstanceId: updatedThread.providerInstanceId,
+          occurredAt: now,
+          payload: { ...message, conversationIds: conversationAssignment.conversationIds },
+        });
+      }
+      for (const turnItem of conversationAssignment.turnItems) {
+        yield* emitEvent({
+          type: "turn-item.updated",
+          threadId: command.threadId,
+          ...(turnItem.runId === null ? {} : { runId: turnItem.runId }),
+          ...(turnItem.nodeId === null ? {} : { nodeId: turnItem.nodeId }),
+          providerInstanceId: updatedThread.providerInstanceId,
+          occurredAt: now,
+          payload: { ...turnItem, conversationIds: conversationAssignment.conversationIds },
+        });
+      }
+      // The metadata projection lands last so organization-only changes preserve
+      // the thread's activity timestamp after the record updates above.
+      yield* emitThreadState();
+    } else {
+      yield* emitThreadState();
+    }
 
     if (command.type === "thread.metadata.update" && command.regenerateTitle === true) {
       yield* Ref.update(effects, (existing) => [
@@ -3803,6 +3997,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const targetRun = input.projection.runs.find(
         (candidate) => candidate.id === input.targetRunId,
       );
+      const existingMessage = input.projection.messages.find(
+        (message) => message.id === input.messageId,
+      );
+      const conversationIds = conversationIdsForMessage({
+        ...(existingMessage === undefined ? {} : { existingMessage }),
+        ...(input.command.type === "message.dispatch" && input.command.conversationId !== undefined
+          ? { conversationId: input.command.conversationId }
+          : {}),
+      });
       if (targetRun === undefined) {
         return yield* new OrchestratorDispatchError({
           commandId: input.command.commandId,
@@ -3941,6 +4144,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }) =>
         Effect.gen(function* () {
           const message: OrchestrationV2ConversationMessage = {
+            ...(conversationIds.length === 0 ? {} : { conversationIds }),
             createdBy: input.createdBy,
             creationSource: input.creationSource,
             ...(input.delegatedCompletion === undefined
@@ -3984,6 +4188,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             completedAt: now,
             updatedAt: now,
             type: "user_message",
+            ...(conversationIds.length === 0 ? {} : { conversationIds }),
             messageId: input.messageId,
             inputIntent:
               input.command.type === "queued-message.promote-to-steer"
@@ -4496,6 +4701,26 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   ) =>
     Effect.gen(function* () {
       let projection = yield* getProjectionWithPendingEvents(command.threadId, events);
+      const existingMessage = projection.messages.find(
+        (message) => message.id === command.messageId,
+      );
+      const conversationIds = conversationIdsForMessage({
+        ...(existingMessage === undefined ? {} : { existingMessage }),
+        ...(command.conversationId === undefined ? {} : { conversationId: command.conversationId }),
+      });
+      const knownConversationIds = new Set(
+        (projection.thread.conversations ?? []).map((conversation) => conversation.id),
+      );
+      const missingConversationId = conversationIds.find(
+        (conversationId) => !knownConversationIds.has(conversationId),
+      );
+      if (missingConversationId !== undefined) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Conversation ${missingConversationId} does not exist on thread ${command.threadId}.`,
+        });
+      }
       if (command.manualContinuationOfRunId !== undefined) {
         const source = projection.runs.find((run) => run.id === command.manualContinuationOfRunId);
         const limited = latestRootProviderFailure(source ?? null, projection.turnItems);
@@ -5061,6 +5286,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           completedAt: null,
         };
         const message: OrchestrationV2ConversationMessage = {
+          ...(conversationIds.length === 0 ? {} : { conversationIds }),
           createdBy: command.createdBy,
           creationSource: command.creationSource,
           ...(command.scheduledTaskId === undefined
@@ -5405,6 +5631,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           completedAt: null,
         };
         const message: OrchestrationV2ConversationMessage = {
+          ...(conversationIds.length === 0 ? {} : { conversationIds }),
           createdBy: command.createdBy,
           creationSource: command.creationSource,
           ...(command.scheduledTaskId === undefined
@@ -5451,6 +5678,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           completedAt: now,
           updatedAt: now,
           type: "user_message",
+          ...(conversationIds.length === 0 ? {} : { conversationIds }),
           messageId: command.messageId,
           inputIntent: "turn_start",
           text: dispatchText,
@@ -6099,6 +6327,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         completedAt: null,
       };
       const message: OrchestrationV2ConversationMessage = {
+        ...(conversationIds.length === 0 ? {} : { conversationIds }),
         createdBy: command.createdBy,
         creationSource: command.creationSource,
         ...(command.scheduledTaskId === undefined
@@ -6141,6 +6370,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         completedAt: now,
         updatedAt: now,
         type: "user_message",
+        ...(conversationIds.length === 0 ? {} : { conversationIds }),
         messageId: command.messageId,
         inputIntent: "turn_start",
         text: dispatchText,

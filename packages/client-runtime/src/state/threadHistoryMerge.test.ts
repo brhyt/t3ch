@@ -1,4 +1,5 @@
 import type { OrchestrationV2ProjectedTurnItem } from "@t3tools/contracts";
+import { MessageId, ThreadConversationId } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 
@@ -45,6 +46,41 @@ function row(index: number): OrchestrationV2ProjectedTurnItem {
 }
 
 describe("threadHistoryMerge", () => {
+  it("reveals a retained conversation anchor when its history page loads, keeping live membership", () => {
+    const base = row(0);
+    if (base.item.type !== "command_execution") throw new Error("Expected command fixture");
+    const anchor: OrchestrationV2ProjectedTurnItem = {
+      ...base,
+      item: {
+        ...base.item,
+        type: "user_message",
+        messageId: MessageId.make("anchor"),
+        inputIntent: "turn_start",
+        createdBy: "user",
+        creationSource: "web",
+        text: "Fix sign-in",
+        attachments: [],
+        conversationIds: [ThreadConversationId.make("auth")],
+      },
+    };
+    if (anchor.item.type !== "user_message") throw new Error("Expected user anchor");
+    const visible = row(1);
+    const projection = {
+      ...v2Projection,
+      turnItems: [anchor.item, visible.item],
+      visibleTurnItems: [visible],
+    };
+    const stale: OrchestrationV2ProjectedTurnItem = {
+      ...anchor,
+      item: { ...anchor.item, conversationIds: [] },
+    };
+    const merged = mergeOlderHistoryIntoProjection(projection, [stale]);
+    expect(merged.visibleTurnItems.map((entry) => entry.sourceItemId)).toEqual([
+      "item-0",
+      "item-1",
+    ]);
+    expect(merged.visibleTurnItems[0]?.item).toMatchObject({ conversationIds: ["auth"] });
+  });
   it("fills activity around partial messages in canonical order and preserves live edits", () => {
     const initial = { ...v2Projection, turnItems: [row(4).item], visibleTurnItems: [row(4)] };
     const preview = [row(1), row(3)];

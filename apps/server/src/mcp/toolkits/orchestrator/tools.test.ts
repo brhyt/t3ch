@@ -7,6 +7,8 @@ import {
   OrchestratorToolkit,
   ScheduleTaskTool,
   ThreadUpdateTool,
+  ConversationListTool,
+  ConversationUpdateTool,
 } from "./tools.ts";
 
 describe("orchestrator MCP tool guidance", () => {
@@ -87,5 +89,13 @@ describe("orchestrator MCP tool guidance", () => {
       "clientRequestId",
     ]);
     assert.include(ThreadUpdateTool.description ?? "", "Workspace and branch changes");
+  });
+
+  it("tells agents how to organize conversation topics without guessing completion", () => {
+    assert.include(ConversationListTool.description ?? "", "current topic assignments");
+    assert.include(ConversationUpdateTool.description ?? "", "clearly separate build items");
+    assert.include(ConversationUpdateTool.description ?? "", "Ask in chat");
+    assert.include(ConversationUpdateTool.description ?? "", "never infer completed");
+    assert.include(ConversationUpdateTool.description ?? "", "full thread context");
   });
 });

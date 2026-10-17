@@ -17,6 +17,7 @@ import {
   type RunId,
   type RuntimeMode,
   type ScheduledTaskId,
+  type ThreadConversationId,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -66,6 +67,7 @@ export type ThreadLaunchWorkspaceStrategy =
 
 export interface ThreadLaunchInitialMessage {
   readonly messageId?: MessageId;
+  readonly conversationId?: ThreadConversationId;
   readonly scheduledTaskId?: ScheduledTaskId;
   readonly senderThreadId?: ThreadId;
   readonly text: string;
@@ -955,6 +957,9 @@ const make = Effect.gen(function* () {
               commandId: messageCommandId,
               threadId,
               messageId,
+              ...(input.initialMessage.conversationId === undefined
+                ? {}
+                : { conversationId: input.initialMessage.conversationId }),
               text: input.initialMessage.text,
               ...(input.initialMessage.scheduledTaskId === undefined
                 ? {}
@@ -1099,6 +1104,9 @@ const make = Effect.gen(function* () {
           : {
               initialMessage: {
                 text: message.text,
+                ...(message.conversationIds?.length === 1
+                  ? { conversationId: message.conversationIds[0] }
+                  : {}),
                 attachments: message.attachments,
                 ...(message.context ? { context: message.context } : {}),
               },
