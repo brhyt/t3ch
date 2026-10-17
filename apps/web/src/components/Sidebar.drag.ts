@@ -46,7 +46,7 @@ export function createSidebarCollisionDetection(
     const source = items?.find((item) => item.kind === "thread" && item.key === args.active.id);
     const boundary = args.droppableContainers
       .find((container) => container.id === sidebarMarkerId("pinned-divider"))
-      ?.node.current?.querySelector(".sidebar-drag-boundary-label")
+      ?.node.current?.querySelector("[data-sidebar-drag-boundary-label]")
       ?.getBoundingClientRect();
     if (items && boundary && source?.kind === "thread" && pointer) {
       boundarySection ??= source.section === "pinned" ? "pinned" : "active";

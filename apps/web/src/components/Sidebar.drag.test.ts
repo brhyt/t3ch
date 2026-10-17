@@ -32,6 +32,7 @@ function layout(
   over: string,
   scale = 1,
   cardHeight = 82,
+  boundaryHeight = 0,
 ) {
   let top = 100;
   const rects = items.map((item) => {
@@ -39,7 +40,7 @@ function layout(
       item.kind === "thread"
         ? (item.section === "pinned" || item.section === "active" ? cardHeight : 36) * scale
         : item.marker === "pinned-header" || item.marker === "pinned-divider"
-          ? 0
+          ? boundaryHeight * scale
           : (item.marker.endsWith("placeholder") ? 0 : 32) * scale;
     const rect = { top, height, bottom: top + height, left: 0, right: 260, width: 260 };
     top += height + 1;
@@ -885,4 +886,25 @@ describe("lifted card clearance", () => {
     expect(511 + apply(511, 36, -500, 96).y).toBe(128);
     expect(511 + apply(511, 36, -500, 136, 114).y).toBe(250);
   });
+});
+
+it("keeps permanent section headers in place while reordering pinned rows", () => {
+  const items = [
+    pinnedHeader,
+    thread("a", "pinned"),
+    thread("b", "pinned"),
+    divider,
+    thread("c", "active"),
+    settledHeader,
+  ];
+  const args = layout(items, "a", "b", 1, 82, 32);
+  const strategy = createSidebarSortingStrategy({
+    items,
+    settledOrder: [],
+    settledExpanded: false,
+    boundaryLabelHeight: 32,
+  });
+  expect(strategy({ ...args, index: 0 })).toEqual(stationary);
+  expect(strategy({ ...args, index: 2 })).toEqual({ ...stationary, y: -83 });
+  expect(strategy({ ...args, index: 3 })).toEqual(stationary);
 });
