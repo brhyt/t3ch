@@ -6,6 +6,7 @@ import { defaultAnimateLayoutChanges, type AnimateLayoutChanges } from "@dnd-kit
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 import {
+  visibleSidebarListItems,
   animateSidebarLayoutChanges,
   archiveSelectedThreadEntries,
   buildBulkTitleRegenerationContextMenuItem,
@@ -2318,5 +2319,72 @@ describe("Working shelf (beta)", () => {
         unsnooze: false,
       });
     });
+  });
+});
+
+describe("collapsed pinned threads", () => {
+  const pins = Array.from({ length: 8 }, (_, i) => ({
+    kind: "thread" as const,
+    key: `pin-${i}`,
+    section: "pinned" as const,
+  }));
+  const items = [
+    { kind: "marker" as const, marker: "pinned-header" as const },
+    ...pins,
+    { kind: "marker" as const, marker: "pinned-divider" as const },
+    { kind: "thread" as const, key: "active", section: "active" as const },
+  ];
+  it("shows five pins and retains the selected thread without changing the full order", () => {
+    const visible = visibleSidebarListItems(items, false, "pin-7", { pinned: true, active: true });
+    expect(visible.filter((item) => item.kind === "thread").map((item) => item.key)).toEqual([
+      "pin-0",
+      "pin-1",
+      "pin-2",
+      "pin-3",
+      "pin-4",
+      "pin-7",
+      "active",
+    ]);
+    expect(visibleSidebarListItems(items, true, null, { pinned: true, active: true })).toBe(items);
+    expect(items.filter((item) => item.kind === "thread").map((item) => item.key)).toEqual([
+      "pin-0",
+      "pin-1",
+      "pin-2",
+      "pin-3",
+      "pin-4",
+      "pin-5",
+      "pin-6",
+      "pin-7",
+      "active",
+    ]);
+  });
+  it("collapses either section without hiding its drop marker", () => {
+    const collapsed = visibleSidebarListItems(items, true, "pin-7", {
+      pinned: false,
+      active: false,
+    });
+    expect(collapsed).toEqual(items.filter((item) => item.kind === "marker"));
+    expect(
+      visibleSidebarListItems(items, true, null, { pinned: false, active: true })
+        .filter((item) => item.kind === "thread")
+        .map((item) => item.key),
+    ).toEqual(["active"]);
+    expect(
+      visibleSidebarListItems(items, true, null, { pinned: true, active: false }).filter(
+        (item) => item.kind === "thread",
+      ),
+    ).toHaveLength(8);
+  });
+  it("resolves a visible drop using the complete order, preserving hidden pins", () => {
+    expect(resolveSidebarDropTarget(items, "pin-0", "pin-2")?.pinnedOrder).toEqual([
+      "pin-1",
+      "pin-2",
+      "pin-0",
+      "pin-3",
+      "pin-4",
+      "pin-5",
+      "pin-6",
+      "pin-7",
+    ]);
   });
 });
