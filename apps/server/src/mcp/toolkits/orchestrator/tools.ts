@@ -277,7 +277,7 @@ export const ConversationListTool = Tool.make("t3_conversation_list", {
 
 export const ConversationUpdateTool = Tool.make("t3_conversation_update", {
   description:
-    "Create, update, or assign exchanges to conversation topics in a T3 thread. Organize work automatically when clearly separate build items emerge. Ask in chat before grouping ambiguous work. Assign only user message IDs returned by t3_thread_read. Explicitly update the topic state as work changes; never infer completed merely because a provider run ended. A message may belong to multiple topics, and all topics retain the provider's full thread context. Omit threadId for this thread. Reuse clientRequestId only when retrying the same mutation.",
+    "Create, update, or assign exchanges to conversation topics in a T3 thread. Before beginning work, create a separate topic for each independently actionable deliverable, including new work introduced while another topic is selected. Reuse matching topics and keep discussion, implementation, and testing of one deliverable together. Do not ask permission for clear splits; ask in chat before ambiguous grouping. A skill invocation alone is not a new deliverable. Assign only user message IDs returned by t3_thread_read, to every applicable topic for mixed requests. Explicitly update topic states as work changes; never infer completed merely because a provider run ended. All topics retain the provider's full thread context. Omit threadId for this thread. Reuse clientRequestId only when retrying the same mutation.",
   parameters: ConversationUpdateInput,
   success: ConversationUpdateResult,
   failure: OrchestratorMcpFailure,
@@ -285,7 +285,7 @@ export const ConversationUpdateTool = Tool.make("t3_conversation_update", {
   dependencies: threadMetadataDependencies,
 })
   .annotate(Tool.Title, "Update conversation topics")
-  .annotate(Tool.Destructive, true)
+  .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, false);
 
 const ThreadSendTool = Tool.make("t3_thread_send", {

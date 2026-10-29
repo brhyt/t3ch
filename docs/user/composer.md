@@ -56,6 +56,10 @@ Create a conversation, then select its pill to read its exchanges and send a
 follow-up. Choose **Full** to return to the complete thread. The agent keeps the
 same session and context when you switch views.
 
+When you introduce a separate piece of work, the agent creates a conversation
+for it, even if another conversation is selected. Related follow-ups stay in
+their existing conversation. The agent asks when the grouping is unclear.
+
 Conversations needing a decision appear first, followed by active, waiting, and
 completed work. You or the agent can update the status and reopen completed work.
 An agent finishing a turn does not automatically complete the conversation.
