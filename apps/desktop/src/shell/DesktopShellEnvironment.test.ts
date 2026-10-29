@@ -416,6 +416,17 @@ describe("DesktopShellEnvironment", () => {
     }),
   );
 
+  it.effect("finds standard macOS CLI locations when shell and launchctl probes fail", () =>
+    Effect.gen(function* () {
+      const env: NodeJS.ProcessEnv = { HOME: "/Users/test", PATH: "/usr/bin:/bin" };
+      yield* runShellEnvironment({ env, platform: "darwin", handler: () => "" });
+      assert.equal(
+        env.PATH,
+        "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin:/Users/test/.local/bin",
+      );
+    }),
+  );
+
   it.effect("falls back to launchctl PATH on macOS when shell probing does not return one", () =>
     Effect.gen(function* () {
       const env: NodeJS.ProcessEnv = {
@@ -435,7 +446,7 @@ describe("DesktopShellEnvironment", () => {
       });
 
       assert.deepEqual(commands, ["/opt/homebrew/bin/nu", "/bin/zsh", "/bin/launchctl"]);
-      assert.equal(env.PATH, "/opt/homebrew/bin:/usr/bin");
+      assert.equal(env.PATH, "/opt/homebrew/bin:/usr/bin:/usr/local/bin");
     }),
   );
 
