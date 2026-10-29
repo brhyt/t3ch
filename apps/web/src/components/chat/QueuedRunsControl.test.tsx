@@ -20,10 +20,15 @@ vi.mock("../../state/entities", () => ({
 
 vi.mock("../../state/threads", () => ({
   threadEnvironment: {
+    resumeThreadQueue: Symbol("resumeThreadQueue"),
     cancelQueuedRun: Symbol("cancelQueuedRun"),
     promoteQueuedRun: Symbol("promoteQueuedRun"),
     reorderQueuedRun: Symbol("reorderQueuedRun"),
   },
+}));
+
+vi.mock("../../state/session", () => ({
+  useEnvironmentScope: () => true,
 }));
 
 vi.mock("../../state/use-atom-command", () => ({
