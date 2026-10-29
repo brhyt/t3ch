@@ -1,6 +1,8 @@
 import { WorkflowSelector, WorkflowPanel, WorkflowDrawerToggle } from "./chat/WorkflowControls";
 import { useWorkflowStore } from "~/workflowStore";
 import { appendWorkflowContext, workflowBlockReason } from "~/workflowConfig";
+
+import { multitaskRequest, acknowledgeMultitaskRequest } from "./chat/multitaskRequest";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
@@ -1713,6 +1715,9 @@ export default function ChatView(props: ChatViewProps) {
     reportFailure: false,
   });
   const setThreadInteractionMode = useOrchestrationCommand(threadEnvironment.setInteractionMode, {
+    reportFailure: false,
+  });
+  const startMultitask = useOrchestrationCommand(threadEnvironment.startMultitask, {
     reportFailure: false,
   });
   const startThreadTurn = useOrchestrationCommand(threadEnvironment.startTurn, {
@@ -8473,7 +8478,33 @@ export default function ChatView(props: ChatViewProps) {
   ) => {
     e?.preventDefault();
     const conversationIdForSend = selectedConversationId;
+
+    const isMultitask = submissionIntent === "multitask";
     if (
+      isMultitask &&
+      (!isServerThread ||
+        phase !== "running" ||
+        editingQueuedRun ||
+        serverConfig?.environment.capabilities.multitask !== true)
+    )
+      return;
+    const draftSignature = () => {
+      const draft = useComposerDraftStore.getState().getComposerDraft(composerDraftTarget);
+      return JSON.stringify(
+        draft && [
+          draft.prompt,
+          draft.images.map((entry) => entry.id),
+          draft.files.map((entry) => entry.id),
+          draft.terminalContexts,
+          draft.previewAnnotations,
+          draft.reviewComments,
+          draft.threadContexts,
+        ],
+      );
+    };
+    const submittedDraftSignature = isMultitask ? draftSignature() : null;
+    if (
+      !isMultitask &&
       usageLimitsOffered &&
       usageLimitsKey !== null &&
       !directAnnotation &&
@@ -8777,7 +8808,7 @@ export default function ChatView(props: ChatViewProps) {
       composerThreadContexts.length === 0
         ? parseCodexFeedbackCommand(trimmed)
         : null;
-    if (feedbackCommand && multipleModelSelections === null) {
+    if (!isMultitask && feedbackCommand && multipleModelSelections === null) {
       if (!isServerThread || activeThread.activeProviderThreadId === null) {
         toastManager.add(
           stackedThreadToast({
@@ -8904,7 +8935,7 @@ export default function ChatView(props: ChatViewProps) {
       composerThreadContexts.length === 0
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
-    if (standaloneSlashCommand && multipleModelSelections === null) {
+    if (!isMultitask && standaloneSlashCommand && multipleModelSelections === null) {
       handleInteractionModeChange(standaloneSlashCommand);
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
@@ -8985,7 +9016,20 @@ export default function ChatView(props: ChatViewProps) {
     const outgoingMessageContext = buildOutgoingMessageContext(
       composerAttachmentsSnapshot.map((attachment) => attachment.id),
     );
-    const messageIdForSend = newMessageId();
+    const multitaskRequestKey = `t3-multitask:${environmentId}:${activeThread.id}`;
+    const parallelRequest = isMultitask
+      ? multitaskRequest(
+          sessionStorage,
+          multitaskRequestKey,
+          JSON.stringify([
+            submittedDraftSignature,
+            ctxSelectedModelSelection,
+            runtimeMode,
+            sendInteractionMode,
+          ]),
+        )
+      : null;
+    const messageIdForSend = parallelRequest?.messageId ?? newMessageId();
     const messageCreatedAt = new Date().toISOString();
     // A stale Claude session compacts before this message so the turn does not re-read the
     // old history. The message queues behind the /compact run, since steering into it is
@@ -9218,6 +9262,78 @@ export default function ChatView(props: ChatViewProps) {
         };
       }),
     );
+    if (isMultitask && parallelRequest) {
+      try {
+        const attachments = await turnAttachmentsPromise;
+        const context = buildOutgoingMessageContext(
+          attachments.map((entry, index) =>
+            "id" in entry && entry.id !== undefined
+              ? entry.id
+              : composerAttachmentsSnapshot[index]!.id,
+          ),
+        );
+        const result = await startMultitask({
+          environmentId,
+          input: {
+            commandId: parallelRequest.commandId,
+            parentThreadId: threadIdForSend,
+            messageId: messageIdForSend,
+            text: outgoingMessageText,
+            attachments,
+            ...(context ? { context } : {}),
+            modelSelection: ctxSelectedModelSelection,
+            runtimeMode,
+            interactionMode: sendInteractionMode,
+          },
+        });
+        if (result._tag === "Failure") {
+          const error = squashAtomCommandFailure(result);
+          setThreadError(
+            threadIdForSend,
+            error instanceof Error ? error.message : "The parallel task could not be started.",
+          );
+        } else {
+          acknowledgeMultitaskRequest(
+            sessionStorage,
+            multitaskRequestKey,
+            parallelRequest.commandId,
+          );
+          if (draftSignature() === submittedDraftSignature) {
+            promptRef.current = "";
+            clearComposerDraftContent(composerDraftTarget);
+            composerRef.current?.resetCursorState();
+            if (turnUsesAttachmentUploads) releaseDraftAttachments(composerAttachmentsSnapshot);
+          }
+          setThreadError(threadIdForSend, null);
+          const child = scopeThreadRef(environmentId, result.value.childThreadId);
+          toastManager.add(
+            stackedThreadToast({
+              type: "success",
+              title: "Parallel task started",
+              description: "Your current task continues. The child starts in its own worktree.",
+              actionProps: {
+                children: "Open task",
+                onClick: () => {
+                  void navigate({
+                    to: "/$environmentId/$threadId",
+                    params: buildThreadRouteParams(child),
+                  });
+                },
+              },
+            }),
+          );
+        }
+      } catch (error) {
+        setThreadError(
+          threadIdForSend,
+          error instanceof Error ? error.message : "The parallel task could not be started.",
+        );
+      } finally {
+        sendInFlightRef.current = false;
+        resetLocalDispatch();
+      }
+      return;
+    }
     if (multipleModelSelections !== null) {
       const failedSelections: ModelSelection[] = [];
       let clearedDraft = false;

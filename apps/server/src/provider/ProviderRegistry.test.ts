@@ -6,6 +6,7 @@ import { describe, it, assert, expect } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -65,6 +66,7 @@ import type {
 } from "@t3tools/provider-core/server/driver";
 import * as ProviderInstanceRegistry from "./ProviderInstanceRegistry.ts";
 import * as ProviderRegistry from "./ProviderRegistry.ts";
+import { MAX_PROVIDER_SKILL_ACTION_BYTES } from "./providerSkillActions.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "@t3tools/provider-core/server/maintenanceResolver";
 const decodeServerSettings = Schema.decodeSync(ServerSettings);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
@@ -628,6 +630,116 @@ it.layer(
   });
 
   describe("ProviderRegistry.layer", () => {
+    it.effect("reads actions only from bounded, user-invocable catalog skills", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const directory = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-provider-skill-actions-",
+        });
+        const validPath = path.join(directory, "valid.md");
+        const disabledPath = path.join(directory, "disabled.md");
+        const agentOnlyPath = path.join(directory, "agent-only.md");
+        const oversizedPath = path.join(directory, "oversized.md");
+        yield* fileSystem.writeFileString(
+          validPath,
+          "| Command | Job |\n|---|---|\n| `dg:judge <piece>` | Judge it |\n",
+        );
+        yield* fileSystem.writeFileString(disabledPath, "actions: secret");
+        yield* fileSystem.writeFileString(agentOnlyPath, "actions: secret");
+        yield* fileSystem.writeFileString(
+          oversizedPath,
+          "x".repeat(MAX_PROVIDER_SKILL_ACTION_BYTES + 1),
+        );
+
+        const instanceId = ProviderInstanceId.make("codex-skill-actions");
+        const driver = ProviderDriverKind.make("codex");
+        const provider = {
+          instanceId,
+          driver,
+          status: "ready",
+          enabled: true,
+          installed: true,
+          auth: { status: "authenticated" },
+          checkedAt: "2026-10-18T00:00:00.000Z",
+          version: "1.0.0",
+          models: [],
+          slashCommands: [],
+          skills: [
+            { name: "valid", path: validPath, enabled: true },
+            { name: "disabled", path: disabledPath, enabled: false },
+            { name: "agent-only", path: agentOnlyPath, enabled: true, userInvocable: false },
+            { name: "oversized", path: oversizedPath, enabled: true },
+          ],
+        } satisfies ServerProvider;
+        const instance = {
+          instanceId,
+          driverKind: driver,
+          continuationIdentity: {
+            driverKind: driver,
+            continuationKey: "codex:instance:skill-actions",
+          },
+          displayName: undefined,
+          enabled: true,
+          snapshot: {
+            resolveMaintenance: () =>
+              Effect.succeed(
+                makeManualOnlyProviderMaintenanceCapabilities({
+                  provider: driver,
+                  packageName: null,
+                }),
+              ),
+            getSnapshot: Effect.succeed(provider),
+            refresh: Effect.succeed(provider),
+            streamChanges: Stream.empty,
+            applyUsageLimits: () => Effect.void,
+          },
+          orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+          textGeneration: {} as ProviderInstance["textGeneration"],
+        } satisfies ProviderInstance;
+        const instanceRegistryLayer = Layer.succeed(
+          ProviderInstanceRegistry.ProviderInstanceRegistry,
+          {
+            getInstance: (candidateId) =>
+              Effect.succeed(candidateId === instanceId ? instance : undefined),
+            listInstances: Effect.succeed([instance]),
+            listUnavailable: Effect.succeed([]),
+            streamChanges: Stream.empty,
+            subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), PubSub.subscribe),
+          },
+        );
+
+        yield* Effect.gen(function* () {
+          const registry = yield* ProviderRegistry.ProviderRegistry;
+          expect(yield* registry.getSkillActions({ instanceId, skillName: "valid" })).toEqual({
+            actions: [{ command: "dg:judge", usage: "dg:judge <piece>", description: "Judge it" }],
+          });
+
+          for (const [skillName, reason] of [
+            ["unknown", "skill-not-found"],
+            ["disabled", "skill-not-invocable"],
+            ["agent-only", "skill-not-invocable"],
+            ["oversized", "skill-too-large"],
+          ] as const) {
+            const error = yield* Effect.flip(registry.getSkillActions({ instanceId, skillName }));
+            expect(error.reason).toBe(reason);
+          }
+        }).pipe(
+          Effect.provide(
+            ProviderRegistry.layer.pipe(
+              Layer.provideMerge(instanceRegistryLayer),
+              Layer.provideMerge(
+                ServerConfig.layerTest(process.cwd(), {
+                  prefix: "t3-provider-skill-actions-registry-",
+                }),
+              ),
+              Layer.provideMerge(NodeServices.layer),
+            ),
+          ),
+        );
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    );
+
     it("stores workspace skills and commands without changing machine metadata", () => {
       const provider = {
         instanceId: ProviderInstanceId.make("codex"),

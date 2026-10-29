@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import {
+  ChatAttachmentId,
   CommandId,
   MessageId,
   EventId,
@@ -812,6 +813,14 @@ it.effect("keeps delegated child pull-request links independent of the parent", 
     });
     const parent = yield* projections.getThreadProjection(parentThreadId);
     const parentRun = parent.runs[0]!;
+    const attachment = {
+      type: "file" as const,
+      id: ChatAttachmentId.make("thread-delegated-child-attachment"),
+      name: "review-notes.txt",
+      mimeType: "text/plain",
+      sizeBytes: 12,
+    };
+    const context = { version: 1 as const, records: [] };
     yield* orchestrator.dispatch({
       type: "delegated_task.request",
       commandId: CommandId.make("delegate-parent-pr"),
@@ -819,6 +828,8 @@ it.effect("keeps delegated child pull-request links independent of the parent", 
       parentRunId: parentRun.id,
       parentNodeId: parentRun.rootNodeId!,
       task: "Review the changes",
+      attachments: [attachment],
+      context,
       modelSelection,
       runtimeMode: "full-access",
       interactionMode: "default",
@@ -833,6 +844,8 @@ it.effect("keeps delegated child pull-request links independent of the parent", 
     assert.equal(child.thread.branch, parent.thread.branch);
     assert.equal(child.thread.worktreePath, parent.thread.worktreePath);
     assert.equal(child.thread.lineage.parentThreadId, parentThreadId);
+    assert.deepEqual(child.messages[0]?.attachments, [attachment]);
+    assert.deepEqual(child.messages[0]?.context, context);
 
     const childPullRequest = {
       ...parentPullRequest,

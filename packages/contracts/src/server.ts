@@ -128,6 +128,56 @@ export const ServerProviderSkill = Schema.Struct({
 });
 export type ServerProviderSkill = typeof ServerProviderSkill.Type;
 
+export const ServerProviderSkillAction = Schema.Struct({
+  command: TrimmedNonEmptyString,
+  usage: TrimmedNonEmptyString,
+  description: Schema.optional(TrimmedNonEmptyString),
+});
+export type ServerProviderSkillAction = typeof ServerProviderSkillAction.Type;
+
+export const ServerProviderSkillActionsInput = Schema.Struct({
+  instanceId: ProviderInstanceId,
+  cwd: Schema.optional(TrimmedNonEmptyString),
+  skillName: TrimmedNonEmptyString,
+});
+export type ServerProviderSkillActionsInput = typeof ServerProviderSkillActionsInput.Type;
+
+export const ServerProviderSkillActionsResult = Schema.Struct({
+  actions: Schema.Array(ServerProviderSkillAction),
+});
+export type ServerProviderSkillActionsResult = typeof ServerProviderSkillActionsResult.Type;
+
+export class ServerProviderSkillActionsError extends Schema.TaggedError<ServerProviderSkillActionsError>()(
+  "ServerProviderSkillActionsError",
+  {
+    instanceId: ProviderInstanceId,
+    skillName: TrimmedNonEmptyString,
+    reason: Schema.Literals([
+      "provider-not-found",
+      "skill-not-found",
+      "skill-not-invocable",
+      "skill-too-large",
+      "skill-read-failed",
+    ]),
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    switch (this.reason) {
+      case "provider-not-found":
+        return "The selected provider is no longer available.";
+      case "skill-not-found":
+        return `Skill ${this.skillName} is no longer available.`;
+      case "skill-not-invocable":
+        return `Skill ${this.skillName} cannot be invoked by the user.`;
+      case "skill-too-large":
+        return `Skill ${this.skillName} is too large to inspect for actions.`;
+      case "skill-read-failed":
+        return `Skill ${this.skillName} could not be read.`;
+    }
+  }
+}
+
 export const ServerProviderWorkspaceSnapshot = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   checkedAt: IsoDateTime,

@@ -43,7 +43,11 @@ import {
 } from "@t3tools/client-runtime/state/threads";
 import { resolveThreadWorkingStartedAt } from "@t3tools/client-runtime/state/models";
 import { upgradeLegacyContextMessage } from "@t3tools/shared/composerContextLegacy";
-import { composerContextSendBlockReason, reidentifyComposerContext } from "../lib/composerContext";
+import {
+  composerContextSendBlockReason,
+  reidentifyComposerContext,
+  uploadedComposerContext,
+} from "../lib/composerContext";
 import { uuidv4 } from "../lib/uuid";
 import { mobileSupportsThreadConversations } from "../lib/threadConversations";
 
@@ -80,6 +84,8 @@ import {
   insertComposerDraftText,
   insertComposerDraftContext,
   clearComposerDraftContent,
+  setComposerDraftAttachmentUpload,
+  flushComposerDrafts,
   composerDraftsAtom,
   composerContextImportsAtom,
   ensureComposerDraftsLoaded,
@@ -97,7 +103,7 @@ import {
 } from "@t3tools/client-runtime/state/composer-dispatch";
 import { Atom } from "effect/reactivity";
 import { AsyncResult } from "effect/reactivity";
-import { prepareTurnAttachments } from "../lib/attachmentUpload";
+import { prepareTurnAttachments, type PreparedTurnAttachments } from "../lib/attachmentUpload";
 import { DEFAULT_FOLLOW_UP_BEHAVIOR } from "../lib/followUpBehavior";
 import { mobilePreferencesAtom } from "./preferences";
 import { environmentThreadDetails } from "./threads";
@@ -119,6 +125,7 @@ import { useThreadSelection } from "../state/use-thread-selection";
 import { enqueueThreadOutboxMessage } from "./thread-outbox";
 import { dispatchingQueuedMessageIdAtom, useThreadOutboxMessages } from "./use-thread-outbox";
 import { threadEnvironment } from "./threads";
+import { loadOrCreateMultitaskRetry, clearMultitaskRetry } from "./multitask-retry";
 import { useAtomCommand } from "./use-atom-command";
 import { orchestrationEnvironment } from "./orchestration";
 
@@ -213,6 +220,17 @@ export function useThreadComposerState() {
   const dispatchOrchestrationCommand = useAtomCommand(
     orchestrationEnvironment.v2.dispatchCommand,
     "update conversation",
+  );
+
+  const startMultitask = useAtomCommand(threadEnvironment.startMultitask, { reportFailure: false });
+  const multitaskRetryRef = useRef<{
+    key: string;
+    commandId: CommandId;
+    messageId: MessageId;
+  } | null>(null);
+  const multitaskBusyRef = useRef(false);
+  const multitaskAttachmentsRef = useRef<{ key: string; prepared: PreparedTurnAttachments } | null>(
+    null,
   );
   const [isSavingQueuedEdit, setIsSavingQueuedEdit] = useState(false);
   const savingQueuedEditRef = useRef(false);
@@ -601,6 +619,141 @@ export function useThreadComposerState() {
       setIsSavingQueuedEdit(false);
     }
   }, [editQueuedRun, selectedEnvironmentRuntime?.serverConfig, selectedThreadShell]);
+
+  const onStartMultitask = useCallback(async () => {
+    const thread = selectedThreadShell;
+    if (
+      !thread ||
+      selectedThreadCreation !== null ||
+      multitaskBusyRef.current ||
+      selectedEnvironmentRuntime?.connectionState !== "connected" ||
+      !appAtomRegistry.get(threadEnvironment.startMultitask.permissionAtom(thread.environmentId))
+    )
+      return;
+    const threadKey = scopedThreadKey(thread.environmentId, thread.id);
+    if (getQueuedRunEdit(threadKey) || appAtomRegistry.get(composerContextImportsAtom)[threadKey])
+      return;
+    const draft = getComposerDraftSnapshot(threadKey);
+    const text = draft.text.trim();
+    if (
+      !text ||
+      composerContextSendBlockReason(draft.context) ||
+      draft.attachments.length > PROVIDER_SEND_TURN_MAX_ATTACHMENTS
+    )
+      return;
+    if (
+      composerAttachmentUploadBlockReason({
+        environmentId: thread.environmentId,
+        attachments: draft.attachments,
+        connected: true,
+        serverConfig: selectedEnvironmentRuntime.serverConfig,
+        states: appAtomRegistry.get(composerAttachmentUploadsAtom),
+      })
+    )
+      return;
+    const modelSelection = draft.modelSelection ?? thread.modelSelection;
+    if (
+      isModelSelectionUnavailable(
+        selectedEnvironmentRuntime.serverConfig,
+        modelSelection,
+        thread.projectId,
+      )
+    )
+      return;
+    const key = JSON.stringify([
+      threadKey,
+      text,
+      draft.attachments.map((attachment) => attachment.id),
+      draft.context,
+      modelSelection,
+      draft.runtimeMode ?? thread.runtimeMode,
+      draft.interactionMode ?? thread.interactionMode,
+    ]);
+    multitaskBusyRef.current = true;
+    try {
+      const retry =
+        multitaskRetryRef.current?.key === key
+          ? multitaskRetryRef.current
+          : await loadOrCreateMultitaskRetry(threadKey, key);
+      multitaskRetryRef.current = retry;
+      const prepared =
+        multitaskAttachmentsRef.current?.key === key
+          ? multitaskAttachmentsRef.current.prepared
+          : await prepareTurnAttachments({
+              environmentId: thread.environmentId,
+              attachments: draft.attachments,
+              persistUploadedReferences: async (attachments) => {
+                for (const attachment of attachments)
+                  setComposerDraftAttachmentUpload(threadKey, attachment);
+                await flushComposerDrafts();
+                return "persisted";
+              },
+              supportsImageUploads:
+                selectedEnvironmentRuntime.serverConfig?.environment.capabilities
+                  .attachmentUploads === true,
+            });
+      if (prepared.status !== "ready") return;
+      multitaskAttachmentsRef.current = { key, prepared };
+      const attachments = prepared.attachments.map((attachment, index) => ({
+        ...attachment,
+        id:
+          "id" in attachment && typeof attachment.id === "string"
+            ? attachment.id
+            : (draft.attachments[index]?.id ?? `${retry.messageId}:${index}`),
+      }));
+      const context = uploadedComposerContext(draft.context, draft.attachments, attachments);
+      const result = await startMultitask({
+        environmentId: thread.environmentId,
+        input: {
+          commandId: retry.commandId,
+          messageId: retry.messageId,
+          parentThreadId: thread.id,
+          text,
+          attachments,
+          ...(context ? { context } : {}),
+          modelSelection,
+          runtimeMode: draft.runtimeMode ?? thread.runtimeMode,
+          interactionMode: draft.interactionMode ?? thread.interactionMode,
+          creationSource: "mobile",
+          isolation: "worktree",
+        },
+      });
+      if (result._tag !== "Success") {
+        setThreadComposerError(
+          threadKey,
+          "Could not start the parallel task. Your draft is preserved; retry to resume it.",
+        );
+        return;
+      }
+      const current = getComposerDraftSnapshot(threadKey);
+      if (
+        current.text === draft.text &&
+        JSON.stringify(current.attachments.map((attachment) => attachment.id)) ===
+          JSON.stringify(draft.attachments.map((attachment) => attachment.id)) &&
+        current.context === draft.context
+      ) {
+        clearComposerDraftContent(threadKey, { deferAttachmentCleanup: true });
+        scheduleUnusedComposerAttachmentCleanup(draft.attachments);
+      }
+      clearThreadComposerError(threadKey);
+      await clearMultitaskRetry(threadKey);
+      multitaskRetryRef.current = null;
+      multitaskAttachmentsRef.current = null;
+    } catch (error) {
+      setThreadComposerError(
+        threadKey,
+        error instanceof Error ? error.message : "Could not start the parallel task.",
+      );
+    } finally {
+      multitaskBusyRef.current = false;
+    }
+  }, [
+    selectedThreadShell,
+    selectedThreadCreation,
+    selectedEnvironmentRuntime?.connectionState,
+    selectedEnvironmentRuntime?.serverConfig,
+    startMultitask,
+  ]);
 
   const onSendMessage = useCallback(
     async (followUpOverride?: ActiveTurnComposerAction) => {
@@ -1219,6 +1372,7 @@ export function useThreadComposerState() {
     onNativePasteText,
     onRemoveDraftImage,
     onSendMessage,
+    onStartMultitask,
     onUpdateModelSelection,
     onUpdateRuntimeMode,
     onUpdateInteractionMode,

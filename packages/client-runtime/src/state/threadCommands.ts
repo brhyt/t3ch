@@ -5,6 +5,7 @@ import * as Option from "effect/Option";
 import { Atom } from "effect/reactivity";
 import {
   WS_METHODS,
+  ORCHESTRATION_V2_WS_METHODS,
   type EnvironmentId,
   type OrchestrationV2ShellSnapshot,
 } from "@t3tools/contracts";
@@ -81,6 +82,8 @@ import {
   settleThread,
   snoozeThread,
   startThreadTurn,
+  startMultitask,
+  type StartMultitaskInput,
   stopThreadSession,
   unarchiveThread,
   unlinkThreadPullRequest,
@@ -274,6 +277,16 @@ export function createThreadEnvironmentAtoms<R, E>(
       execute: (input: SetThreadInteractionModeInput) => setThreadInteractionMode(input),
       scheduler,
       concurrency,
+    }),
+    startMultitask: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:commands:thread:multitask",
+      tag: ORCHESTRATION_V2_WS_METHODS.startMultitask,
+      execute: (input: StartMultitaskInput) => startMultitask(input),
+      scheduler,
+      concurrency: {
+        mode: "serial",
+        key: ({ environmentId, input }) => `${environmentId}:${input.parentThreadId}`,
+      },
     }),
     startTurn: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:start-turn",
