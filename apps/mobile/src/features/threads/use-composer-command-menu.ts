@@ -4,6 +4,8 @@ import type {
   ProjectId,
   ProviderInteractionMode,
   ServerProvider,
+  ServerProviderSkill,
+  ServerProviderSkillAction,
   ThreadId,
   ThreadPullRequestLink,
 } from "@t3tools/contracts";
@@ -48,11 +50,38 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ComposerEditorSelection } from "../../components/ComposerEditor";
+import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useComposerPathSearch, useComposerPullRequestSearch } from "../../state/queries";
 import type { ComposerCommandItem } from "./ComposerCommandPopover";
 import { matchesSlashSkillQuery } from "./composerSlashSkillSearch";
+
+export function searchMobileSkillActions(
+  actions: ReadonlyArray<ServerProviderSkillAction>,
+  query: string,
+) {
+  const normalized = query.trim().toLowerCase();
+  return actions
+    .map((action, index) => {
+      const command = action.command.toLowerCase();
+      const score =
+        !normalized || command === normalized || command.split(":").at(-1) === normalized
+          ? 0
+          : command.includes(normalized)
+            ? 1
+            : action.usage.toLowerCase().includes(normalized)
+              ? 2
+              : action.description?.toLowerCase().includes(normalized)
+                ? 3
+                : 4;
+      return { action, index, score };
+    })
+    .filter((match) => match.score < 4)
+    .sort((left, right) => left.score - right.score || left.index - right.index)
+    .slice(0, 40)
+    .map(({ action }) => action);
+}
 
 const WORKSPACE_SNAPSHOT_RETRY_COOLDOWN_MS = 10_000;
 
@@ -154,7 +183,9 @@ export function resolveComposerCommandSelection(input: {
   let replacement = "";
   if (item.type === "path") {
     replacement = `${serializeComposerFileLink(item.path)} `;
-  } else if (item.type === "skill") {
+  } else if (item.type === "skill-action") {
+    replacement = `$${item.skill.name} ${item.action.command} `;
+  } else if (item.type === "skill" || item.type === "skill-base") {
     replacement = `$${item.skill.name} `;
   } else if (item.type === "slash-command") {
     replacement = `/${item.command} `;
@@ -353,7 +384,58 @@ export function useComposerCommandMenu({
     query: trigger?.kind === "pull-request" ? trigger.query : null,
   });
 
+  const [actionScope, setActionScope] = useState<{
+    skill: ServerProviderSkill;
+    draft: string;
+    target: string;
+    owner: string | null;
+    query: string;
+  } | null>(null);
+  const actionTarget = JSON.stringify([environmentId, selectedProviderInstanceId, projectCwd]);
+  const validActionScope =
+    actionScope?.draft === draftMessage &&
+    actionScope.owner === ownerKey &&
+    actionScope.target === actionTarget &&
+    trigger !== null
+      ? actionScope
+      : null;
+  const skillActions = useEnvironmentQuery(
+    validActionScope && environmentId && selectedProviderInstanceId
+      ? serverEnvironment.providerSkillActions({
+          environmentId,
+          input: {
+            instanceId: selectedProviderInstanceId,
+            skillName: validActionScope.skill.name,
+            ...(projectCwd ? { cwd: projectCwd } : {}),
+          },
+        })
+      : null,
+  );
   const items = useMemo<ComposerCommandItem[]>(() => {
+    if (validActionScope) {
+      const skill = validActionScope.skill;
+      const query = validActionScope.query.trim().toLowerCase();
+      const base: ComposerCommandItem = {
+        id: `skill-base:${skill.name}`,
+        type: "skill-base",
+        skill,
+        label: `Use $${skill.name}`,
+        description: "Insert the skill without an action",
+      };
+      return [
+        base,
+        ...searchMobileSkillActions(skillActions.data?.actions ?? [], query).map(
+          (action): ComposerCommandItem => ({
+            id: `skill-action:${skill.name}:${action.command}`,
+            type: "skill-action",
+            skill,
+            action,
+            label: action.usage,
+            description: action.description ?? action.command,
+          }),
+        ),
+      ];
+    }
     if (!trigger) return [];
 
     if (trigger.kind === "pull-request") {
@@ -533,13 +615,32 @@ export function useComposerCommandMenu({
     projectCwd,
     selectedProviderStatus,
     skills,
+    validActionScope,
+    skillActions.data,
     trigger,
     offersUsageLimits,
   ]);
 
   const onSelect = useCallback(
     (item: ComposerCommandItem) => {
-      if (!trigger) return;
+      if (!trigger || (ownerKey && getComposerDraftSnapshot(ownerKey).text !== draftMessage))
+        return;
+      if (item.type === "skill") {
+        setActionScope({
+          skill: item.skill,
+          draft: draftMessage,
+          target: actionTarget,
+          owner: ownerKey,
+          query: "",
+        });
+        return;
+      }
+      if (
+        (item.type === "skill-action" || item.type === "skill-base") &&
+        (!validActionScope || !items.some((candidate) => candidate.id === item.id))
+      )
+        return;
+      setActionScope(null);
       if (item.type === "thread") {
         if (!ownerKey || trigger.kind !== "path") return;
         const shell = threadShells.find(
@@ -637,6 +738,8 @@ export function useComposerCommandMenu({
     },
     [
       draftMessage,
+      actionTarget,
+      validActionScope,
       ownerKey,
       items,
       onChangeDraftMessage,
@@ -654,10 +757,21 @@ export function useComposerCommandMenu({
     trigger,
     items,
     skills,
-    isLoading:
-      trigger?.kind === "pull-request" ? pullRequestSearch.isPending : pathSearch.isPending,
-    error:
-      trigger?.kind === "pull-request"
+    actionSearch: validActionScope
+      ? {
+          query: validActionScope.query,
+          onChange: (query: string) => setActionScope({ ...validActionScope, query }),
+          onBack: () => setActionScope(null),
+        }
+      : undefined,
+    isLoading: validActionScope
+      ? skillActions.isPending
+      : trigger?.kind === "pull-request"
+        ? pullRequestSearch.isPending
+        : pathSearch.isPending,
+    error: validActionScope
+      ? skillActions.error
+      : trigger?.kind === "pull-request"
         ? pullRequestProjectId === null || pullRequestRepository === null
           ? "Pull requests are unavailable for this project."
           : pullRequestSearch.error

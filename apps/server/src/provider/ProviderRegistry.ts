@@ -2,6 +2,9 @@ import {
   defaultInstanceIdForDriver,
   isProviderWorkspaceSnapshotCurrent,
   ProviderDriverKind,
+  ServerProviderSkillActionsError,
+  type ServerProviderSkillActionsInput,
+  type ServerProviderSkillActionsResult,
   type ProviderInstanceId,
   type ServerProvider,
   type ServerProviderUpdateState,
@@ -42,6 +45,10 @@ import {
   type ProviderMaintenanceCapabilities,
 } from "@t3tools/provider-core/server/maintenanceResolver";
 import type { ProviderSnapshotSource } from "./builtInProviderCatalog.ts";
+import {
+  MAX_PROVIDER_SKILL_ACTION_BYTES,
+  parseProviderSkillActions,
+} from "./providerSkillActions.ts";
 
 export type ProviderMaintenanceActionKind = "update";
 
@@ -68,6 +75,10 @@ export class ProviderRegistry extends Context.Service<
       readonly cwd: string;
       readonly fresh?: boolean;
     }) => Effect.Effect<ReadonlyArray<ServerProvider>>;
+
+    readonly getSkillActions: (
+      input: ServerProviderSkillActionsInput,
+    ) => Effect.Effect<ServerProviderSkillActionsResult, ServerProviderSkillActionsError>;
 
     readonly getProviderMaintenanceCapabilitiesForInstance: (
       instanceId: ProviderInstanceId,
@@ -934,6 +945,79 @@ export const layer = Layer.effect(
       );
     });
 
+    const getSkillActions = Effect.fn("ProviderRegistry.getSkillActions")(function* (
+      input: ServerProviderSkillActionsInput,
+    ) {
+      if (input.cwd !== undefined) {
+        yield* refreshWorkspaceSnapshot({
+          instanceId: input.instanceId,
+          cwd: input.cwd,
+        }).pipe(Effect.catchCause(() => Effect.void));
+      }
+      const providers = yield* Ref.get(providersRef);
+      const provider = providers.find((candidate) => candidate.instanceId === input.instanceId);
+      if (!provider) {
+        return yield* new ServerProviderSkillActionsError({
+          instanceId: input.instanceId,
+          skillName: input.skillName,
+          reason: "provider-not-found",
+        });
+      }
+      const workspaceSkills =
+        input.cwd === undefined
+          ? undefined
+          : provider.workspaceSnapshots?.find((snapshot) => snapshot.cwd === input.cwd)?.skills;
+      const skill = (workspaceSkills ?? provider.skills).find(
+        (candidate) => candidate.name.toLowerCase() === input.skillName.toLowerCase(),
+      );
+      if (!skill) {
+        return yield* new ServerProviderSkillActionsError({
+          instanceId: input.instanceId,
+          skillName: input.skillName,
+          reason: "skill-not-found",
+        });
+      }
+      if (!skill.enabled || skill.userInvocable === false) {
+        return yield* new ServerProviderSkillActionsError({
+          instanceId: input.instanceId,
+          skillName: input.skillName,
+          reason: "skill-not-invocable",
+        });
+      }
+      const info = yield* fileSystem.stat(skill.path).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ServerProviderSkillActionsError({
+              instanceId: input.instanceId,
+              skillName: input.skillName,
+              reason: "skill-read-failed",
+              cause,
+            }),
+        ),
+      );
+      if (info.type !== "File" || info.size > MAX_PROVIDER_SKILL_ACTION_BYTES) {
+        return yield* new ServerProviderSkillActionsError({
+          instanceId: input.instanceId,
+          skillName: input.skillName,
+          reason: info.type === "File" ? "skill-too-large" : "skill-read-failed",
+        });
+      }
+      const markdown = yield* fileSystem.readFileString(skill.path).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ServerProviderSkillActionsError({
+              instanceId: input.instanceId,
+              skillName: input.skillName,
+              reason: "skill-read-failed",
+              cause,
+            }),
+        ),
+      );
+      return {
+        actions: parseProviderSkillActions(markdown),
+      } satisfies ServerProviderSkillActionsResult;
+    });
+
     return {
       getProviders: Ref.get(providersRef),
       refresh: (provider?: ProviderDriverKind) =>
@@ -942,6 +1026,7 @@ export const layer = Layer.effect(
         refreshInstance(instanceId).pipe(Effect.catchCause(recoverRefreshFailure)),
       refreshWorkspaceSnapshot: (input) =>
         refreshWorkspaceSnapshot(input).pipe(Effect.catchCause(recoverRefreshFailure)),
+      getSkillActions,
       getProviderMaintenanceCapabilitiesForInstance,
       setProviderMaintenanceActionState,
       get streamChanges() {

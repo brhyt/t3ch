@@ -8,6 +8,10 @@ import {
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
+vi.mock("../../state/query", () => ({
+  useEnvironmentQuery: () => ({ data: null, error: null, isPending: false }),
+}));
+
 const refreshProviders = vi.hoisted(() => vi.fn());
 vi.mock("react-native", () => ({ Alert: { alert: vi.fn() } }));
 
@@ -30,6 +34,7 @@ vi.mock("../../state/use-atom-command", () => ({
 
 import {
   buildComposerSlashCommandItems,
+  searchMobileSkillActions,
   resolveComposerCommandSelection,
   useComposerCommandMenu,
 } from "./use-composer-command-menu";
@@ -319,5 +324,64 @@ describe("workspace command discovery retry", () => {
     await act(() => vi.advanceTimersByTimeAsync(20_000));
     expect(refreshProviders).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("mobile skill action insertion", () => {
+  const skill = { name: "design-graph", path: "/skills/design-graph/SKILL.md", enabled: true };
+  it("inserts only the exact action command and preserves surrounding text", () => {
+    expect(
+      resolveComposerCommandSelection({
+        draftMessage: "Please $des next",
+        trigger: { rangeStart: 7, rangeEnd: 11 },
+        item: {
+          id: "judge",
+          type: "skill-action",
+          skill,
+          action: { command: "dg:judge", usage: "dg:judge <piece>", description: "Judge work" },
+          label: "Judge",
+          description: "Judge work",
+        },
+        allowInteractionMode: true,
+      }),
+    ).toEqual({ text: "Please $design-graph dg:judge  next", cursor: 30, interactionMode: null });
+  });
+  it("allows the base skill without requiring an action", () => {
+    expect(
+      resolveComposerCommandSelection({
+        draftMessage: "$des",
+        trigger: { rangeStart: 0, rangeEnd: 4 },
+        item: { id: "base", type: "skill-base", skill, label: "Use skill", description: "" },
+        allowInteractionMode: false,
+      }),
+    ).toEqual({ text: "$design-graph ", cursor: 14, interactionMode: null });
+  });
+});
+
+describe("mobile skill action search", () => {
+  it("ranks exact commands ahead of incidental mentions and preserves equal-score source order", () => {
+    const actions = [
+      {
+        command: "dg:interpret",
+        usage: "dg:interpret",
+        description: "Interpret then optimize the design",
+      },
+      { command: "dg:usage", usage: "dg:usage optimize" },
+      { command: "dg:optimize-layout", usage: "dg:optimize-layout" },
+      { command: "dg:optimize", usage: "dg:optimize <run>" },
+      { command: "other:optimize", usage: "other:optimize" },
+      { command: "dg:judge", usage: "dg:judge" },
+    ];
+    expect(searchMobileSkillActions(actions, "optimize").map((action) => action.command)).toEqual([
+      "dg:optimize",
+      "other:optimize",
+      "dg:optimize-layout",
+      "dg:usage",
+      "dg:interpret",
+    ]);
+    expect(searchMobileSkillActions(actions, "DG:OPTIMIZE")[0]?.command).toBe("dg:optimize");
+    expect(searchMobileSkillActions(actions, "").map((action) => action.command)).toEqual(
+      actions.map((action) => action.command),
+    );
   });
 });

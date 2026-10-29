@@ -2920,6 +2920,8 @@ export const OrchestrationV2Command = Schema.Union([
     parentRunId: RunId,
     parentNodeId: NodeId,
     task: TrimmedNonEmptyString,
+    attachments: Schema.optional(Schema.Array(ChatAttachment)),
+    context: Schema.optional(OrchestrationMessageContext),
     title: Schema.optional(TrimmedNonEmptyString),
     modelSelection: ModelSelection,
     runtimeMode: RuntimeMode,
@@ -3055,6 +3057,7 @@ export const ORCHESTRATION_V2_WS_METHODS = {
   stopWorkflow: "orchestration.stopWorkflow",
   getTurnItem: "orchestration.getTurnItem",
   launchThread: "orchestration.launchThread",
+  startMultitask: "orchestration.startMultitask",
   subscribeArchivedShell: "orchestration.subscribeArchivedShell",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
@@ -3152,6 +3155,27 @@ export const OrchestrationV2ThreadLaunchResult = Schema.Struct({
   resumed: Schema.Boolean,
 });
 export type OrchestrationV2ThreadLaunchResult = typeof OrchestrationV2ThreadLaunchResult.Type;
+
+export const OrchestrationV2MultitaskInput = Schema.Struct({
+  commandId: CommandId,
+  parentThreadId: ThreadId,
+  text: TrimmedNonEmptyString,
+  attachments: Schema.Array(ChatAttachment),
+  context: Schema.optional(OrchestrationMessageContext),
+  modelSelection: Schema.optional(ModelSelection),
+  runtimeMode: Schema.optional(RuntimeMode),
+  interactionMode: Schema.optional(ProviderInteractionMode),
+  creationSource: Schema.optional(OrchestrationV2CreationSource),
+  isolation: Schema.optional(Schema.Literals(["worktree", "shared"])),
+});
+export type OrchestrationV2MultitaskInput = typeof OrchestrationV2MultitaskInput.Type;
+
+export const OrchestrationV2MultitaskResult = Schema.Struct({
+  taskId: NodeId,
+  childThreadId: ThreadId,
+  sequence: NonNegativeInt,
+});
+export type OrchestrationV2MultitaskResult = typeof OrchestrationV2MultitaskResult.Type;
 
 export const OrchestrationV2DispatchCommandResult = Schema.Struct({
   sequence: NonNegativeInt,
@@ -3332,6 +3356,24 @@ export class OrchestrationV2ThreadLaunchError extends Schema.TaggedError<Orchest
   {
     commandId: CommandId,
     projectId: ProjectId,
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
+export class OrchestrationV2MultitaskError extends Schema.TaggedError<OrchestrationV2MultitaskError>()(
+  "OrchestrationV2MultitaskError",
+  {
+    commandId: CommandId,
+    parentThreadId: ThreadId,
+    reason: Schema.Literals([
+      "parent-not-active",
+      "mode-escalation",
+      "project-not-found",
+      "worktree-unavailable",
+      "dispatch-failed",
+      "result-missing",
+    ]),
     message: Schema.String,
     cause: Schema.optional(Schema.Defect()),
   },
@@ -3560,6 +3602,10 @@ export const OrchestrationV2RpcSchemas = {
   launchThread: {
     input: OrchestrationV2ThreadLaunchInput,
     output: OrchestrationV2ThreadLaunchResult,
+  },
+  startMultitask: {
+    input: OrchestrationV2MultitaskInput,
+    output: OrchestrationV2MultitaskResult,
   },
   subscribeArchivedShell: {
     input: Schema.Struct({}),
