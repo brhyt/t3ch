@@ -14,6 +14,7 @@ import {
   RunId,
   RuntimeRequestId,
   ThreadId,
+  ThreadConversationId,
   TurnItemId,
   WS_METHODS,
   type OrchestrationV2Command,
@@ -34,6 +35,7 @@ import {
   type PreparedConnection,
 } from "../connection/model.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
+import { RpcPermissionGuard } from "../rpc/client.ts";
 import * as RpcSession from "../rpc/session.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import { v2Now, v2Projection, v2ThreadId } from "../state/orchestrationV2TestFixtures.ts";
@@ -171,7 +173,10 @@ describe("V2 environment commands", () => {
           createWorkspaceRootIfMissing: true,
         },
       ]);
-    }).pipe(Effect.provide(layerTestCrypto)),
+    }).pipe(
+      Effect.provide(layerTestCrypto),
+      Effect.provideService(RpcPermissionGuard, { authorize: () => Effect.void }),
+    ),
   );
 
   it.effect("persists and clears project presentation and environment settings", () =>
@@ -215,7 +220,10 @@ describe("V2 environment commands", () => {
           defaultThreadEnvMode: null,
         },
       ]);
-    }).pipe(Effect.provide(layerTestCrypto)),
+    }).pipe(
+      Effect.provide(layerTestCrypto),
+      Effect.provideService(RpcPermissionGuard, { authorize: () => Effect.void }),
+    ),
   );
 
   it.effect("preserves caller command ids for idempotent V2 commands", () =>
@@ -231,7 +239,10 @@ describe("V2 environment commands", () => {
       expect(commands).toEqual([
         { type: "thread.archive", commandId: "queued-command", threadId: "thread-1" },
       ]);
-    }).pipe(Effect.provide(layerTestCrypto)),
+    }).pipe(
+      Effect.provide(layerTestCrypto),
+      Effect.provideService(RpcPermissionGuard, { authorize: () => Effect.void }),
+    ),
   );
 
   it.effect("resolves run ordinal zero to the persisted thread-start checkpoint", () =>
@@ -275,7 +286,10 @@ describe("V2 environment commands", () => {
           checkpointId,
         },
       ]);
-    }).pipe(Effect.provide(layerTestCrypto)),
+    }).pipe(
+      Effect.provide(layerTestCrypto),
+      Effect.provideService(RpcPermissionGuard, { authorize: () => Effect.void }),
+    ),
   );
 
   it.effect("preserves plan implementation provenance on V2 runs", () =>
@@ -315,7 +329,10 @@ describe("V2 environment commands", () => {
         deliveryIntent: "auto",
         dispatchMode: { type: "start_immediately" },
       });
-    }).pipe(Effect.provide(layerTestCrypto)),
+    }).pipe(
+      Effect.provide(layerTestCrypto),
+      Effect.provideService(RpcPermissionGuard, { authorize: () => Effect.void }),
+    ),
   );
 
   it.effect("preserves an existing worktree and branch during first-message launch", () =>
@@ -359,7 +376,10 @@ describe("V2 environment commands", () => {
           branch: "feature",
         },
       });
-    }).pipe(Effect.provide(layerTestCrypto)),
+    }).pipe(
+      Effect.provide(layerTestCrypto),
+      Effect.provideService(RpcPermissionGuard, { authorize: () => Effect.void }),
+    ),
   );
 
   it.effect("provisions an origin-based worktree for an existing empty thread", () =>
@@ -399,7 +419,10 @@ describe("V2 environment commands", () => {
           startFromOrigin: true,
         },
       });
-    }).pipe(Effect.provide(layerTestCrypto)),
+    }).pipe(
+      Effect.provide(layerTestCrypto),
+      Effect.provideService(RpcPermissionGuard, { authorize: () => Effect.void }),
+    ),
   );
 
   it.effect("uses server-resolved delivery intent without fetching the full projection", () =>
@@ -435,7 +458,41 @@ describe("V2 environment commands", () => {
         });
       }
       expect(projectionRequests).toEqual([]);
-    }).pipe(Effect.provide(layerTestCrypto)),
+    }).pipe(
+      Effect.provide(layerTestCrypto),
+      Effect.provideService(RpcPermissionGuard, { authorize: () => Effect.void }),
+    ),
+  );
+
+  it.effect("keeps the selected conversation and original text across delivery modes", () =>
+    Effect.gen(function* () {
+      const commands: OrchestrationV2Command[] = [];
+      const supervisor = yield* makeSupervisor({ commands, projects: [] });
+      for (const mode of ["start", "auto", "queue", "steer", "restart"] as const) {
+        yield* startThreadTurn({
+          commandId: CommandId.make(`conversation-${mode}`),
+          threadId: v2ThreadId,
+          conversationId: ThreadConversationId.make("sign-in"),
+          message: {
+            messageId: MessageId.make(`follow-up-${mode}`),
+            role: "user",
+            text: "Use the last thread",
+            attachments: [],
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          dispatchMode: mode,
+        }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+        expect(commands.at(-1)).toMatchObject({
+          type: "message.dispatch",
+          conversationId: "sign-in",
+          text: "Use the last thread",
+        });
+      }
+    }).pipe(
+      Effect.provide(layerTestCrypto),
+      Effect.provideService(RpcPermissionGuard, { authorize: () => Effect.void }),
+    ),
   );
 
   it.effect("retains projection-shaped delivery for servers without command context support", () =>
@@ -500,7 +557,10 @@ describe("V2 environment commands", () => {
         expect(commands.at(-1)).not.toHaveProperty("deliveryIntent");
       }
       expect(projectionRequests).toEqual([v2ThreadId, v2ThreadId, v2ThreadId, v2ThreadId]);
-    }).pipe(Effect.provide(layerTestCrypto)),
+    }).pipe(
+      Effect.provide(layerTestCrypto),
+      Effect.provideService(RpcPermissionGuard, { authorize: () => Effect.void }),
+    ),
   );
 
   it.effect("Stop with no run left ends the thread's pull request watches", () =>
@@ -554,7 +614,10 @@ describe("V2 environment commands", () => {
           watching: false,
         },
       ]);
-    }).pipe(Effect.provide(layerTestCrypto)),
+    }).pipe(
+      Effect.provide(layerTestCrypto),
+      Effect.provideService(RpcPermissionGuard, { authorize: () => Effect.void }),
+    ),
   );
 
   it.effect.each([
@@ -630,7 +693,10 @@ describe("V2 environment commands", () => {
               },
             ],
       );
-    }).pipe(Effect.provide(layerTestCrypto)),
+    }).pipe(
+      Effect.provide(layerTestCrypto),
+      Effect.provideService(RpcPermissionGuard, { authorize: () => Effect.void }),
+    ),
   );
 
   it.effect(
@@ -717,7 +783,10 @@ describe("V2 environment commands", () => {
           },
         ]);
         expect(commands[5]).not.toHaveProperty("attachments");
-      }).pipe(Effect.provide(layerTestCrypto)),
+      }).pipe(
+        Effect.provide(layerTestCrypto),
+        Effect.provideService(RpcPermissionGuard, { authorize: () => Effect.void }),
+      ),
   );
 
   it.effect("delegates model selection to the server without fetching the full projection", () =>
@@ -759,7 +828,10 @@ describe("V2 environment commands", () => {
         },
       ]);
       expect(projectionRequests).toEqual([]);
-    }).pipe(Effect.provide(layerTestCrypto)),
+    }).pipe(
+      Effect.provide(layerTestCrypto),
+      Effect.provideService(RpcPermissionGuard, { authorize: () => Effect.void }),
+    ),
   );
 
   it.effect("retains provider-switch shaping for servers without command context support", () =>
@@ -791,7 +863,10 @@ describe("V2 environment commands", () => {
           modelSelection: { instanceId: "claude", model: "claude-sonnet-4-6" },
         },
       ]);
-    }).pipe(Effect.provide(layerTestCrypto)),
+    }).pipe(
+      Effect.provide(layerTestCrypto),
+      Effect.provideService(RpcPermissionGuard, { authorize: () => Effect.void }),
+    ),
   );
 
   it.effect.each([true, false])(
@@ -821,7 +896,10 @@ describe("V2 environment commands", () => {
             restoreFiles,
           },
         ]);
-      }).pipe(Effect.provide(layerTestCrypto)),
+      }).pipe(
+        Effect.provide(layerTestCrypto),
+        Effect.provideService(RpcPermissionGuard, { authorize: () => Effect.void }),
+      ),
   );
 
   it.effect("validates identified checkpoints locally for older servers", () =>
@@ -884,7 +962,10 @@ describe("V2 environment commands", () => {
         }
         expect(projectionRequests).toEqual([v2ThreadId]);
       }
-    }).pipe(Effect.provide(layerTestCrypto)),
+    }).pipe(
+      Effect.provide(layerTestCrypto),
+      Effect.provideService(RpcPermissionGuard, { authorize: () => Effect.void }),
+    ),
   );
 
   it.effect("dispatches settle and unsettle commands without timestamps", () =>
@@ -915,7 +996,10 @@ describe("V2 environment commands", () => {
           reason: "user",
         },
       ]);
-    }).pipe(Effect.provide(layerTestCrypto)),
+    }).pipe(
+      Effect.provide(layerTestCrypto),
+      Effect.provideService(RpcPermissionGuard, { authorize: () => Effect.void }),
+    ),
   );
 
   it.effect("sends an active order key without changing activity timestamps", () =>
@@ -935,7 +1019,10 @@ describe("V2 environment commands", () => {
           orderKey: "mf",
         },
       ]);
-    }).pipe(Effect.provide(layerTestCrypto)),
+    }).pipe(
+      Effect.provide(layerTestCrypto),
+      Effect.provideService(RpcPermissionGuard, { authorize: () => Effect.void }),
+    ),
   );
 
   it.effect("dismisses a pending user-input request", () =>
@@ -957,7 +1044,10 @@ describe("V2 environment commands", () => {
           requestId: "request-1",
         },
       ]);
-    }).pipe(Effect.provide(layerTestCrypto)),
+    }).pipe(
+      Effect.provide(layerTestCrypto),
+      Effect.provideService(RpcPermissionGuard, { authorize: () => Effect.void }),
+    ),
   );
 
   it.effect("dispatches an explicit idle start without fetching the full projection", () =>
@@ -992,7 +1082,10 @@ describe("V2 environment commands", () => {
           dispatchMode: { type: "start_immediately" },
         },
       ]);
-    }).pipe(Effect.provide(layerTestCrypto)),
+    }).pipe(
+      Effect.provide(layerTestCrypto),
+      Effect.provideService(RpcPermissionGuard, { authorize: () => Effect.void }),
+    ),
   );
 
   it.effect(
@@ -1046,7 +1139,10 @@ describe("V2 environment commands", () => {
             subagentId,
           },
         ]);
-      }).pipe(Effect.provide(layerTestCrypto)),
+      }).pipe(
+        Effect.provide(layerTestCrypto),
+        Effect.provideService(RpcPermissionGuard, { authorize: () => Effect.void }),
+      ),
   );
 
   it.effect("interrupts a known run without fetching the full projection", () =>
@@ -1075,6 +1171,9 @@ describe("V2 environment commands", () => {
           holdQueue: true,
         },
       ]);
-    }).pipe(Effect.provide(layerTestCrypto)),
+    }).pipe(
+      Effect.provide(layerTestCrypto),
+      Effect.provideService(RpcPermissionGuard, { authorize: () => Effect.void }),
+    ),
   );
 });

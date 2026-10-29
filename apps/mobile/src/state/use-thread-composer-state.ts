@@ -6,6 +6,10 @@ import { useAtomValue } from "@effect/atom-react";
 import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/shell";
 import { resolvePendingHandoff } from "@t3tools/client-runtime/handoff";
 import {
+  filterConversationTurnItems,
+  sortThreadConversations,
+} from "@t3tools/client-runtime/thread-conversations";
+import {
   deriveProviderSubagentStatus,
   deriveRunlessWorkStartedAt,
   deriveThreadActivityRun,
@@ -24,6 +28,9 @@ import {
   type ModelSelection,
   type ProviderInteractionMode,
   type RuntimeMode,
+  ThreadConversationId,
+  type ThreadConversationMutation,
+  type ThreadConversationState,
   type ThreadId,
 } from "@t3tools/contracts";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
@@ -38,6 +45,7 @@ import { resolveThreadWorkingStartedAt } from "@t3tools/client-runtime/state/mod
 import { upgradeLegacyContextMessage } from "@t3tools/shared/composerContextLegacy";
 import { composerContextSendBlockReason, reidentifyComposerContext } from "../lib/composerContext";
 import { uuidv4 } from "../lib/uuid";
+import { mobileSupportsThreadConversations } from "../lib/threadConversations";
 
 import { makeQueuedMessageMetadata } from "../lib/commandMetadata";
 import {
@@ -112,6 +120,7 @@ import { enqueueThreadOutboxMessage } from "./thread-outbox";
 import { dispatchingQueuedMessageIdAtom, useThreadOutboxMessages } from "./use-thread-outbox";
 import { threadEnvironment } from "./threads";
 import { useAtomCommand } from "./use-atom-command";
+import { orchestrationEnvironment } from "./orchestration";
 
 const EMPTY_QUEUE_WORKFLOW_ATOM = Atom.make<null>(null).pipe(
   Atom.withLabel("mobile-thread-queue-workflow:empty"),
@@ -184,6 +193,9 @@ export function useThreadComposerState() {
   } = useThreadSelection();
   const selectedThreadProjection = useSelectedThreadProjection();
   const selectedThreadVisibleTurnItems = useSelectedThreadVisibleTurnItems();
+  const [selectedConversationIds, setSelectedConversationIds] = useState<
+    Record<string, ThreadConversationId | null>
+  >({});
   const composerDrafts = useAtomValue(composerDraftsAtom);
   const acknowledgedMessages = useAtomValue(acknowledgedThreadMessagesAtom);
   const queuedMessagesByThreadKey = useThreadOutboxMessages();
@@ -198,6 +210,10 @@ export function useThreadComposerState() {
     label: "edit queued message",
     reportFailure: false,
   });
+  const dispatchOrchestrationCommand = useAtomCommand(
+    orchestrationEnvironment.v2.dispatchCommand,
+    "update conversation",
+  );
   const [isSavingQueuedEdit, setIsSavingQueuedEdit] = useState(false);
   const savingQueuedEditRef = useRef(false);
   const pastedTextFileNamesRef = useRef<{ threadKey: string | null; names: Set<string> }>({
@@ -225,6 +241,38 @@ export function useThreadComposerState() {
   const selectedThreadKey = selectedThreadShell
     ? scopedThreadKey(selectedThreadShell.environmentId, selectedThreadShell.id)
     : null;
+  const selectedConversationId =
+    selectedThreadKey === null ? null : (selectedConversationIds[selectedThreadKey] ?? null);
+  const setSelectedConversationId = useCallback(
+    (id: ThreadConversationId | null) => {
+      if (selectedThreadKey === null) return;
+      setSelectedConversationIds((current) => ({ ...current, [selectedThreadKey]: id }));
+    },
+    [selectedThreadKey],
+  );
+  const supportsThreadConversations = mobileSupportsThreadConversations(
+    selectedEnvironmentRuntime?.serverConfig?.environment.capabilities,
+  );
+  const activeConversationId = supportsThreadConversations ? selectedConversationId : null;
+  const projectedConversations = selectedThreadProjection?.projection.thread.conversations;
+  const conversations = useMemo(
+    () =>
+      supportsThreadConversations ? sortThreadConversations(projectedConversations ?? []) : [],
+    [projectedConversations, supportsThreadConversations],
+  );
+  const conversationTurnItems = useMemo(
+    () =>
+      filterConversationTurnItems(
+        selectedThreadVisibleTurnItems,
+        activeConversationId,
+        selectedThreadProjection?.projection.turnItems,
+      ),
+    [
+      activeConversationId,
+      selectedThreadProjection?.projection.turnItems,
+      selectedThreadVisibleTurnItems,
+    ],
+  );
   const selectedThreadQueuedMessages = useMemo(
     () =>
       selectedThreadKey
@@ -233,6 +281,15 @@ export function useThreadComposerState() {
           )
         : [],
     [queuedMessagesByThreadKey, selectedThreadKey],
+  );
+  const visibleQueuedMessages = useMemo(
+    () =>
+      activeConversationId === null
+        ? selectedThreadQueuedMessages
+        : selectedThreadQueuedMessages.filter(
+            (message) => message.conversationId === activeConversationId,
+          ),
+    [activeConversationId, selectedThreadQueuedMessages],
   );
   const feedbackSubmissions = useMemo(
     () => (selectedThreadKey ? (feedbackSubmissionsByThreadKey[selectedThreadKey] ?? []) : []),
@@ -262,7 +319,7 @@ export function useThreadComposerState() {
       !selectedThreadMessages?.some((message) => message.id === pendingCreationMessage.messageId)
         ? [pendingThreadCreationMessage(pendingCreationMessage)]
         : [];
-    const feed = buildThreadFeed(selectedThreadVisibleTurnItems, {
+    const feed = buildThreadFeed(conversationTurnItems, {
       anchoredMessages: pendingCreation,
       attempts: selectedThreadAttempts,
       nodes: selectedThreadNodes,
@@ -270,6 +327,7 @@ export function useThreadComposerState() {
     const pendingAcknowledgments = acknowledgedMessages.filter(
       (message) =>
         scopedThreadKey(message.environmentId, message.threadId) === selectedThreadKey &&
+        (activeConversationId === null || message.conversationId === activeConversationId) &&
         !selectedThreadQueuedMessages.some((queued) => queued.messageId === message.messageId),
     );
     if (pendingAcknowledgments.length === 0) return feed;
@@ -280,10 +338,11 @@ export function useThreadComposerState() {
     selectedThreadMessages,
     selectedThreadAttempts,
     selectedThreadNodes,
-    selectedThreadVisibleTurnItems,
+    conversationTurnItems,
     pendingCreationMessage,
     selectedThreadKey,
     selectedThreadQueuedMessages,
+    activeConversationId,
     acknowledgedMessages,
   ]);
   useEffect(() => {
@@ -684,6 +743,7 @@ export function useThreadComposerState() {
 
       const metadata = makeQueuedMessageMetadata();
       const messageId = MessageId.make(metadata.messageId);
+      const conversationId = activeConversationId;
       clearThreadComposerError(threadKey);
       const enqueuePromise = enqueueThreadOutboxMessage({
         environmentId: selectedThreadShell.environmentId,
@@ -699,6 +759,7 @@ export function useThreadComposerState() {
           provider,
           draft.interactionMode ?? thread.interactionMode,
         ),
+        ...(conversationId === null ? {} : { conversationId }),
         ...(followUpDispatchMode === null ? {} : { dispatchMode: followUpDispatchMode }),
         createdAt: metadata.createdAt,
       });
@@ -735,8 +796,82 @@ export function useThreadComposerState() {
       selectedThreadCreation,
       selectedThreadRuntime?.status,
       selectedThreadShell,
+      activeConversationId,
       uploadThreadFeedback,
     ],
+  );
+
+  const mutateConversation = useCallback(
+    async (conversationMutation: ThreadConversationMutation) => {
+      if (!selectedThreadShell || !supportsThreadConversations) return false;
+      const result = await dispatchOrchestrationCommand({
+        environmentId: selectedThreadShell.environmentId,
+        input: {
+          type: "thread.metadata.update",
+          commandId: CommandId.make(uuidv4()),
+          threadId: selectedThreadShell.id,
+          conversationMutation,
+        },
+      });
+      return result._tag === "Success";
+    },
+    [dispatchOrchestrationCommand, selectedThreadShell, supportsThreadConversations],
+  );
+
+  const onCreateConversation = useCallback(
+    async (title: string) => {
+      const trimmed = title.trim();
+      if (trimmed.length === 0) return;
+      const id = ThreadConversationId.make(uuidv4());
+      if (await mutateConversation({ type: "create", id, title: trimmed })) {
+        setSelectedConversationId(id);
+      }
+    },
+    [mutateConversation, setSelectedConversationId],
+  );
+
+  const onRenameConversation = useCallback(
+    async (id: ThreadConversationId, title: string) => {
+      const trimmed = title.trim();
+      if (trimmed.length === 0) return;
+      await mutateConversation({ type: "update", id, title: trimmed });
+    },
+    [mutateConversation],
+  );
+
+  const onUpdateConversationState = useCallback(
+    async (id: ThreadConversationId, state: ThreadConversationState) => {
+      await mutateConversation({ type: "update", id, state });
+    },
+    [mutateConversation],
+  );
+
+  const onAssignLatestExchange = useCallback(
+    async (id: ThreadConversationId) => {
+      if (!selectedThreadShell) return;
+      const latestUserMessage = selectedThreadVisibleTurnItems.findLast(
+        ({ item }) => item.type === "user_message" && item.threadId === selectedThreadShell.id,
+      )?.item;
+      if (!latestUserMessage || latestUserMessage.type !== "user_message") {
+        Dialog.alert("No exchange to assign", "Send a message before assigning an exchange.");
+        return;
+      }
+      const conversationIds = latestUserMessage.conversationIds ?? [];
+      if (conversationIds.includes(id)) return;
+      if (conversationIds.length >= 20) {
+        Dialog.alert(
+          "Too many conversations",
+          "This exchange already belongs to 20 conversations.",
+        );
+        return;
+      }
+      await mutateConversation({
+        type: "assign",
+        messageIds: [latestUserMessage.messageId],
+        conversationIds: [...conversationIds, id],
+      });
+    },
+    [mutateConversation, selectedThreadShell, selectedThreadVisibleTurnItems],
   );
 
   const onChangeDraftMessage = useCallback(
@@ -1044,9 +1179,17 @@ export function useThreadComposerState() {
     feedbackSubmissions,
     dismissFeedback,
     selectedThreadFeed,
+    supportsThreadConversations,
+    conversations,
+    selectedConversationId,
+    setSelectedConversationId,
+    onCreateConversation,
+    onRenameConversation,
+    onUpdateConversationState,
+    onAssignLatestExchange,
     selectedThreadActivityRun,
     selectedThreadQueueCount,
-    selectedThreadQueuedMessages,
+    selectedThreadQueuedMessages: visibleQueuedMessages,
     dispatchingQueuedMessageId,
     activeWorkStartedAt,
     runlessWorkActive,

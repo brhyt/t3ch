@@ -30,6 +30,13 @@ import {
   OrchestratorMcpThreadWaitResult,
   ThreadMetadataMcpUpdateInput,
   ThreadMetadataMcpUpdateResult,
+  ThreadConversation,
+  ThreadConversationMutation,
+  ThreadId,
+  CommandId,
+  NonNegativeInt,
+  MessageId,
+  ThreadConversationIds,
 } from "@t3tools/contracts";
 import { Tool, Toolkit } from "effect/ai";
 import * as Schema from "effect/Schema";
@@ -232,6 +239,55 @@ export const ThreadUpdateTool = Tool.make("t3_thread_update", {
   .annotate(Tool.Destructive, true)
   .annotate(Tool.Idempotent, false);
 
+const ConversationListInput = Schema.Struct({
+  threadId: Schema.optional(ThreadId),
+});
+const ConversationListResult = Schema.Struct({
+  threadId: ThreadId,
+  conversations: Schema.Array(ThreadConversation),
+  exchanges: Schema.Array(
+    Schema.Struct({ messageId: MessageId, conversationIds: ThreadConversationIds }),
+  ),
+});
+const ConversationUpdateInput = Schema.Struct({
+  threadId: Schema.optional(ThreadId),
+  mutation: ThreadConversationMutation,
+  clientRequestId: Schema.optional(Schema.String.check(Schema.isMaxLength(256))),
+});
+const ConversationUpdateResult = Schema.Struct({
+  threadId: ThreadId,
+  conversations: Schema.Array(ThreadConversation),
+  commandId: CommandId,
+  sequence: NonNegativeInt,
+});
+
+export const ConversationListTool = Tool.make("t3_conversation_list", {
+  description:
+    "List conversation topics and each user exchange's current topic assignments inside a T3 thread. Omit threadId for this thread. Use these topics to organize clearly distinct work while keeping the provider's full thread context.",
+  parameters: ConversationListInput,
+  success: ConversationListResult,
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+  dependencies: threadMetadataDependencies,
+})
+  .annotate(Tool.Title, "List conversation topics")
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, true);
+
+export const ConversationUpdateTool = Tool.make("t3_conversation_update", {
+  description:
+    "Create, update, or assign exchanges to conversation topics in a T3 thread. Before beginning work, create a separate topic for each independently actionable deliverable, including new work introduced while another topic is selected. Reuse matching topics and keep discussion, implementation, and testing of one deliverable together. Do not ask permission for clear splits; ask in chat before ambiguous grouping. A skill invocation alone is not a new deliverable. Assign only user message IDs returned by t3_thread_read, to every applicable topic for mixed requests. Explicitly update topic states as work changes; never infer completed merely because a provider run ended. All topics retain the provider's full thread context. Omit threadId for this thread. Reuse clientRequestId only when retrying the same mutation.",
+  parameters: ConversationUpdateInput,
+  success: ConversationUpdateResult,
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+  dependencies: threadMetadataDependencies,
+})
+  .annotate(Tool.Title, "Update conversation topics")
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, false);
+
 const ThreadSendTool = Tool.make("t3_thread_send", {
   description:
     "Send a message to any T3 thread in this environment. The target cannot have broader permission modes than the caller. Use delegate_task with the full review context and a new clientRequestId for independent review rounds. For a follow-up that needs the same child's conversation, send to its childThreadId. After the original task completes, a requested follow-up creates a fresh task in that child thread and returns taskId; its completion notifies the parent, and the original result stays unchanged. mode='auto' starts an idle thread, steers a fully active turn, or queues behind a turn that is not yet steerable. Use queue for a separate follow-up turn, steer for an in-flight update, or restart to interrupt-and-restart the active turn. clientRequestId makes retries idempotent.",
@@ -286,6 +342,8 @@ export const OrchestratorToolkit = Toolkit.make(
   ThreadListTool,
   ThreadReadTool,
   ThreadUpdateTool,
+  ConversationListTool,
+  ConversationUpdateTool,
   ThreadSendTool,
   ThreadWaitTool,
   ThreadInterruptTool,

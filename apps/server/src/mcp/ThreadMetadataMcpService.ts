@@ -6,6 +6,10 @@ import {
   type ThreadMetadataMcpAction,
   type ThreadMetadataMcpUpdateInput,
   type ThreadMetadataMcpUpdateResult,
+  type ThreadConversation,
+  type ThreadConversationMutation,
+  type MessageId,
+  type ThreadConversationId,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -24,6 +28,36 @@ export class ThreadMetadataMcpService extends Context.Service<
       scope: McpInvocationScope,
       input: ThreadMetadataMcpUpdateInput,
     ) => Effect.Effect<ThreadMetadataMcpUpdateResult, OrchestratorMcpFailure>;
+    readonly listConversations: (
+      scope: McpInvocationScope,
+      input: { readonly threadId?: ThreadId | undefined },
+    ) => Effect.Effect<
+      {
+        readonly threadId: ThreadId;
+        readonly conversations: ReadonlyArray<ThreadConversation>;
+        readonly exchanges: ReadonlyArray<{
+          readonly messageId: MessageId;
+          readonly conversationIds: ReadonlyArray<ThreadConversationId>;
+        }>;
+      },
+      OrchestratorMcpFailure
+    >;
+    readonly updateConversation: (
+      scope: McpInvocationScope,
+      input: {
+        readonly threadId?: ThreadId | undefined;
+        readonly mutation: ThreadConversationMutation;
+        readonly clientRequestId?: string | undefined;
+      },
+    ) => Effect.Effect<
+      {
+        readonly threadId: ThreadId;
+        readonly conversations: ReadonlyArray<ThreadConversation>;
+        readonly commandId: CommandId;
+        readonly sequence: number;
+      },
+      OrchestratorMcpFailure
+    >;
   }
 >()("t3/mcp/ThreadMetadataMcpService") {}
 
@@ -50,7 +84,7 @@ function stablePart(value: string): string {
 function commandId(input: {
   readonly scope: McpInvocationScope;
   readonly threadId: ThreadId;
-  readonly action: ThreadMetadataMcpAction;
+  readonly action: string;
   readonly requestKey: string;
 }): CommandId {
   return CommandId.make(
@@ -224,7 +258,99 @@ const make = Effect.gen(function* () {
     });
   });
 
-  return ThreadMetadataMcpService.of({ update });
+  const resolveThread = Effect.fn("ThreadMetadataMcpService.resolveConversationThread")(function* (
+    scope: McpInvocationScope,
+    requestedThreadId: ThreadId | undefined,
+  ) {
+    if (!scope.capabilities.has("orchestration")) {
+      return yield* failure(
+        "capability_denied",
+        "This MCP credential does not grant orchestration capabilities.",
+      );
+    }
+    const threadId = requestedThreadId ?? scope.thread?.threadId;
+    if (threadId === undefined) {
+      return yield* failure(
+        "target_required",
+        "Pass threadId: this MCP client is not running inside a T3 thread.",
+      );
+    }
+    const thread = yield* threadManagement
+      .getThreadShell(threadId)
+      .pipe(
+        Effect.mapError((error) =>
+          failure(
+            "orchestration_error",
+            `Unable to locate thread ${threadId}: ${errorMessage(error)}`,
+          ),
+        ),
+      );
+    if (thread === null || thread.deletedAt !== null) {
+      return yield* failure("thread_not_found", `Thread ${threadId} was not found.`);
+    }
+    return { threadId };
+  });
+
+  const listConversations: ThreadMetadataMcpService["Service"]["listConversations"] = Effect.fn(
+    "ThreadMetadataMcpService.listConversations",
+  )(function* (scope, input) {
+    const { threadId } = yield* resolveThread(scope, input.threadId);
+    const records = yield* threadManagement
+      .getThreadRecords(threadId, ["messages"], { messageRoles: ["user"] })
+      .pipe(Effect.mapError((error) => failure("orchestration_error", errorMessage(error))));
+    return {
+      threadId,
+      conversations: records.thread.conversations ?? [],
+      exchanges: records.messages.map((message) => ({
+        messageId: message.id,
+        conversationIds: message.conversationIds ?? [],
+      })),
+    };
+  });
+
+  const updateConversation: ThreadMetadataMcpService["Service"]["updateConversation"] = (
+    scope,
+    input,
+  ) =>
+    Effect.gen(function* () {
+      const { threadId } = yield* resolveThread(scope, input.threadId);
+      const requestKey =
+        input.clientRequestId === undefined
+          ? yield* crypto.randomUUIDv4().pipe(Effect.orDie)
+          : input.clientRequestId;
+      const updateCommandId = commandId({
+        scope,
+        threadId,
+        action: `conversation-${input.mutation.type}`,
+        requestKey,
+      });
+      const dispatched = yield* threadManagement
+        .dispatch({
+          type: "thread.metadata.update",
+          commandId: updateCommandId,
+          threadId,
+          conversationMutation: input.mutation,
+        })
+        .pipe(
+          Effect.mapError((error) =>
+            failure(
+              "orchestration_error",
+              `Unable to update conversations for thread ${threadId}: ${errorMessage(error)}`,
+            ),
+          ),
+        );
+      const updated = yield* threadManagement
+        .getThreadRecords(threadId, [])
+        .pipe(Effect.mapError((error) => failure("orchestration_error", errorMessage(error))));
+      return {
+        threadId,
+        conversations: updated.thread.conversations ?? [],
+        commandId: updateCommandId,
+        sequence: dispatched.sequence,
+      };
+    });
+
+  return ThreadMetadataMcpService.of({ update, listConversations, updateConversation });
 });
 
 export const layer: Layer.Layer<
