@@ -7,6 +7,7 @@ import type { RpcSession } from "../rpc/session.ts";
 import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 import {
+  ORCHESTRATION_V2_WS_METHODS,
   AuthFilesystemWriteScope,
   AuthPreviewOperateScope,
   AuthOrchestrationOperateScope,
@@ -91,7 +92,6 @@ describe("command permissions", () => {
       }),
     ),
   );
-
 
   it("provides the destination guard to high-level environment commands", async () => {
     const registry = AtomRegistry.make();
