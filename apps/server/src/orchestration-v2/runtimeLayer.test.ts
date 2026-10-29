@@ -3646,6 +3646,103 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
     }),
   );
 
+  it.effect("promotes another thread's queue while a completed thread is locked", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const eventSink = yield* EventSink.EventSinkV2;
+      const executor = yield* ThreadCommandExecutor.ThreadCommandExecutor;
+      const blocked = ThreadId.make("queue-promotion-blocked");
+      const ready = ThreadId.make("queue-promotion-ready");
+      for (const threadId of [blocked, ready]) {
+        yield* orchestrator.dispatch({
+          type: "thread.create",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make(`create:${threadId}`),
+          threadId,
+          projectId: ProjectId.make(`project:${threadId}`),
+          title: "Queue promotion",
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: process.cwd(),
+        });
+        for (const queued of [false, true]) {
+          yield* orchestrator.dispatch({
+            type: "message.dispatch",
+            createdBy: "user",
+            creationSource: "web",
+            commandId: CommandId.make(`send:${threadId}:${queued}`),
+            threadId,
+            messageId: MessageId.make(`message:${threadId}:${queued}`),
+            text: queued ? "Read this follow-up" : "Long job",
+            attachments: [],
+            modelSelection,
+            dispatchMode: { type: queued ? "queue_after_active" : "start_immediately" },
+          });
+        }
+      }
+      const lockAcquired = yield* Deferred.make<void>();
+      const releaseLock = yield* Deferred.make<void>();
+      yield* executor
+        .withLock(
+          blocked,
+          Effect.gen(function* () {
+            yield* Deferred.succeed(lockAcquired, undefined);
+            yield* Deferred.await(releaseLock);
+          }),
+        )
+        .pipe(Effect.forkScoped);
+      yield* Deferred.await(lockAcquired);
+      const promoted = yield* Deferred.make<RunId>();
+      const afterSequence = yield* orchestrator.getThreadEventSequence(ready);
+      yield* eventSink.stream({ threadId: ready, afterSequence }).pipe(
+        Stream.runForEach((stored) =>
+          stored.event.type === "run.updated" && stored.event.payload.status === "starting"
+            ? Deferred.succeed(promoted, stored.event.payload.id)
+            : Effect.void,
+        ),
+        Effect.forkScoped,
+      );
+      yield* Effect.gen(function* () {
+        let queuedRunId: RunId | undefined;
+        for (const threadId of [blocked, ready]) {
+          const projection = yield* orchestrator.getThreadProjection(threadId);
+          const active = projection.runs.find((run) => run.status === "starting");
+          assert.isDefined(active);
+          if (threadId === ready)
+            queuedRunId = projection.runs.find((run) => run.status === "queued")?.id;
+          const now = yield* DateTime.now;
+          yield* eventSink.write({
+            events: [
+              {
+                id: EventId.make(`complete:${threadId}`),
+                type: "run.updated",
+                threadId,
+                runId: active.id,
+                providerInstanceId: active.providerInstanceId,
+                occurredAt: now,
+                payload: { ...active, status: "completed", completedAt: now },
+              },
+            ],
+          });
+        }
+        assert.isDefined(queuedRunId);
+        assert.equal(yield* Deferred.await(promoted), queuedRunId);
+        const delivered = yield* orchestrator.getThreadProjection(ready);
+        assert.equal(delivered.runs.find((run) => run.id === queuedRunId)?.status, "starting");
+        const stillBlocked = yield* orchestrator.getThreadProjection(blocked);
+        assert.equal(
+          stillBlocked.runs.find(
+            (run) => run.userMessageId === MessageId.make(`message:${blocked}:true`),
+          )?.status,
+          "queued",
+        );
+      }).pipe(Effect.ensuring(Deferred.succeed(releaseLock, undefined)));
+    }),
+  );
+
   it.effect.each([false, true])(
     "promotes only one queued run after each terminal run (notification: %s)",
     (automatic) =>

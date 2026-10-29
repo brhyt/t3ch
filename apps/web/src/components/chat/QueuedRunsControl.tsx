@@ -8,11 +8,13 @@ import type {
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import {
   Clock3Icon,
   CornerUpRightIcon,
   GripVerticalIcon,
   ListOrderedIcon,
+  PauseIcon,
   PencilIcon,
 } from "lucide-react";
 import { useId, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
@@ -21,6 +23,7 @@ import { useAssetUrls } from "../../assets/assetUrls";
 import { threadEnvironment } from "../../state/threads";
 import { useThreadProjection } from "../../state/entities";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { useEnvironmentScope } from "../../state/session";
 import { isImageAttachment, type ChatMessage } from "../../types";
 import { cn } from "~/lib/utils";
 import { ComposerBanner } from "./ComposerBanner";
@@ -69,6 +72,9 @@ export function QueuedRunsControl({
   const reorder = useAtomCommand(threadEnvironment.reorderQueuedRun);
   const promote = useAtomCommand(threadEnvironment.promoteQueuedRun);
   const cancel = useAtomCommand(threadEnvironment.cancelQueuedRun);
+  const resume = useAtomCommand(threadEnvironment.resumeThreadQueue);
+  const canResume = useEnvironmentScope(props.environmentId, AuthOrchestrationOperateScope);
+  const [resuming, setResuming] = useState(false);
   const [expanded, setExpanded] = useState(true);
   const queueListId = useId();
   const [busyRunId, setBusyRunId] = useState<RunId | null>(null);
@@ -259,12 +265,46 @@ export function QueuedRunsControl({
           <ComposerBanner.Icon>
             <ListOrderedIcon />
           </ComposerBanner.Icon>
-          <ComposerBanner.Content className="text-muted-foreground">Queued</ComposerBanner.Content>
+          <ComposerBanner.Content className="text-muted-foreground">
+            {workflow?.isHeld ? "Queue paused" : "Queued"}
+          </ComposerBanner.Content>
           <ComposerBanner.Actions>
             <ComposerBanner.Count>{items.length}</ComposerBanner.Count>
             <ComposerBanner.ToggleIcon expanded={expanded} />
           </ComposerBanner.Actions>
         </ComposerBanner.Row>
+        {workflow?.isHeld ? (
+          <ComposerBanner.Row>
+            <ComposerBanner.Icon>
+              <PauseIcon />
+            </ComposerBanner.Icon>
+            <ComposerBanner.Content className="text-muted-foreground">
+              {activeRun
+                ? "Resume to send after this turn."
+                : "Resume to send your queued messages."}
+            </ComposerBanner.Content>
+            <ComposerBanner.Actions>
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={!canResume || resuming || busyRunId !== null}
+                onClick={async () => {
+                  setResuming(true);
+                  try {
+                    await resume({
+                      environmentId: props.environmentId,
+                      input: { threadId: props.threadId },
+                    });
+                  } finally {
+                    setResuming(false);
+                  }
+                }}
+              >
+                {resuming ? "Resuming…" : "Resume queue"}
+              </Button>
+            </ComposerBanner.Actions>
+          </ComposerBanner.Row>
+        ) : null}
         <ComposerBanner.Scroll className={cn("max-h-32", !expanded && "hidden")}>
           <ComposerBanner.Children render={<ol />} id={queueListId}>
             {items.map((item) => {
