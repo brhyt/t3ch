@@ -19,6 +19,7 @@ import * as Schema from "effect/Schema";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
+import { withConversationPromptContext } from "./ConversationPromptContext.ts";
 
 const yieldToRuntime = Effect.yieldNow.pipe(
   Effect.andThen(
@@ -349,6 +350,7 @@ export const layer: Layer.Layer<
               cause: "The persisted steering message or target run is missing.",
             });
           }
+          const thread = yield* projections.getThread(input.threadId);
           yield* loaded.session.value
             .steerTurn({
               threadId: input.threadId,
@@ -357,9 +359,13 @@ export const layer: Layer.Layer<
               providerTurnId: loaded.providerTurn.id,
               message: {
                 messageId: message.id,
-                text: projectComposerContextForProvider({
-                  text: message.text,
-                  records: message.context?.records ?? [],
+                text: withConversationPromptContext({
+                  text: projectComposerContextForProvider({
+                    text: message.text,
+                    records: message.context?.records ?? [],
+                  }),
+                  thread,
+                  message,
                 }),
                 attachments: message.attachments,
                 createdBy: message.createdBy,

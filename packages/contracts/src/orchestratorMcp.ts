@@ -1,5 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import { ThreadConversationId } from "./baseSchemas.ts";
+import { ThreadConversation } from "./threadConversations.ts";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 
 import {
@@ -350,6 +352,7 @@ export const OrchestratorMcpThreadReadInput = Schema.Struct({
 export type OrchestratorMcpThreadReadInput = typeof OrchestratorMcpThreadReadInput.Type;
 
 export const OrchestratorMcpThreadDetail = Schema.Struct({
+  conversations: Schema.optional(Schema.Array(ThreadConversation)),
   threadId: ThreadId,
   projectId: ProjectId,
   title: Schema.String,
@@ -423,6 +426,7 @@ export const OrchestratorMcpThreadReadResult = Schema.Struct({
 export type OrchestratorMcpThreadReadResult = typeof OrchestratorMcpThreadReadResult.Type;
 
 export const OrchestratorMcpThreadSendInput = Schema.Struct({
+  conversationId: Schema.optional(ThreadConversationId),
   threadId: ThreadId,
   message: OrchestratorMcpPrompt,
   mode: Schema.optional(Schema.Literals(["auto", "queue", "steer", "restart"])),

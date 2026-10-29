@@ -1950,6 +1950,9 @@ const layerWsRpc = (
                             ...(input.initialMessage.messageId === undefined
                               ? {}
                               : { messageId: input.initialMessage.messageId }),
+                            ...(input.initialMessage.conversationId === undefined
+                              ? {}
+                              : { conversationId: input.initialMessage.conversationId }),
                             text: input.initialMessage.text,
                             attachments: input.initialMessage.attachments,
                             ...(input.initialMessage.context === undefined

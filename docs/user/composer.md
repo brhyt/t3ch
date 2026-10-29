@@ -65,6 +65,27 @@ In Design mode, hover to find an element and use the ancestor buttons to select 
 
 Use Annotate to attach a note to the selected element, including when direct source editing is unavailable. Pending notes appear as numbered pins and in the inspector, where you can revisit or remove them. The composer's edit and note summary lets you review saved changes separately from instructions awaiting the agent.
 
+## Follow up on a conversation
+
+Use conversations to keep track of separate pieces of work inside one thread.
+Create a conversation, then select its pill to read its exchanges and send a
+follow-up. Choose **Full** to return to the complete thread. The agent keeps the
+same session and context when you switch views.
+
+When you introduce a separate piece of work, the agent creates a conversation
+for it, even if another conversation is selected. Related follow-ups stay in
+their existing conversation. The agent asks when the grouping is unclear.
+
+Conversations needing a decision appear first, followed by active, waiting, and
+completed work. You or the agent can update the status and reopen completed work.
+An agent finishing a turn does not automatically complete the conversation.
+You can assign an existing exchange to more than one conversation. Pending
+approval and input requests remain available while viewing another conversation.
+
+Conversation organization is saved on the thread's environment. It is available
+when that environment supports conversations; older environments keep the full
+thread view.
+
 ## Send while the agent is working
 
 On web and desktop, choose **Settings → General → Follow-up behavior** to queue
