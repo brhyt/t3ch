@@ -98,6 +98,7 @@ import { useScaledTextRole } from "../settings/appearance/useScaledTextRole";
 import type { RemoteClientConnectionState } from "../../lib/connection";
 import { resolveProviderOptionDescriptors } from "../../lib/providerOptions";
 import { Menu } from "../../components/ui/Menu";
+import { threadEnvironment } from "../../state/threads";
 import type { ActiveTurnComposerAction } from "@t3tools/client-runtime/state/composer-dispatch";
 import type { FollowUpBehavior } from "../../lib/followUpBehavior";
 import {
@@ -171,6 +172,7 @@ export interface ThreadComposerProps {
   readonly onNativePasteText: (paste: ComposerTextPaste) => Promise<void>;
   readonly onRemoveDraftImage: (imageId: string) => void;
   readonly onStopThread: () => void;
+  readonly onStartMultitask: () => Promise<void>;
   readonly onSendMessage: (followUp?: ActiveTurnComposerAction) => Promise<MessageId | null>;
   readonly onShowUsageLimits: (report: UsageLimitsReport | null) => void;
   readonly canSwitchProvider: boolean;
@@ -234,6 +236,7 @@ function SendActionButton(props: {
   readonly accessibilityLabel: string;
   readonly presentation: ComposerSendPresentation;
   readonly disabled: boolean;
+  readonly onMultitask?: () => void;
   readonly onSend: (followUp?: ActiveTurnComposerAction) => void;
 }) {
   const { presentation } = props;
@@ -246,7 +249,7 @@ function SendActionButton(props: {
       onPress={() => props.onSend()}
     />
   );
-  if (!presentation.offersFollowUpChoice || presentation.action === null || props.disabled) {
+  if ((!presentation.offersFollowUpChoice && !props.onMultitask) || props.disabled) {
     return button;
   }
   const actions = [presentation.action, presentation.alternate].filter(
@@ -256,15 +259,32 @@ function SendActionButton(props: {
     <Menu
       accessibilityLabel="Choose how to send this message"
       shouldOpenOnLongPress
-      actions={actions.map((action) => ({
-        id: action,
-        title: FOLLOW_UP_ACTION_LABEL[action],
-        subtitle: FOLLOW_UP_ACTION_SUBTITLE[action],
-        state: action === presentation.action ? ("on" as const) : ("off" as const),
-      }))}
-      onPressAction={({ nativeEvent }) =>
-        props.onSend(nativeEvent.event as ActiveTurnComposerAction)
-      }
+      actions={[
+        ...actions.map((action) => ({
+          id: action,
+          title: FOLLOW_UP_ACTION_LABEL[action],
+          subtitle: FOLLOW_UP_ACTION_SUBTITLE[action],
+          state: action === presentation.action ? ("on" as const) : ("off" as const),
+        })),
+        ...(props.onMultitask
+          ? [
+              {
+                id: "multitask",
+                title: "Multitask",
+                subtitle: "Start parallel work in an isolated workspace",
+              },
+            ]
+          : []),
+      ]}
+      onPressAction={({ nativeEvent }) => {
+        if (nativeEvent.event === "multitask") props.onMultitask?.();
+        else if (
+          nativeEvent.event === "queue" ||
+          nativeEvent.event === "steer" ||
+          nativeEvent.event === "restart"
+        )
+          props.onSend(nativeEvent.event);
+      }}
     >
       {button}
     </Menu>
@@ -368,6 +388,9 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   const showStopAction = !hasContent && props.canStopThread && queuedEdit === null;
 
   const uploadStates = useAtomValue(composerAttachmentUploadsAtom);
+  const multitaskPermission = useAtomValue(
+    threadEnvironment.startMultitask.permissionAtom(props.environmentId),
+  );
   const attachmentsUploading =
     props.connectionState === "connected" &&
     composerAttachmentsStillUploading({
@@ -742,6 +765,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           <ComposerPopoverAnchor>
             <ComposerCommandPopover
               items={composerMenu.items}
+              actionSearch={composerMenu.actionSearch}
               triggerKind={composerMenu.trigger.kind}
               isLoading={composerMenu.isLoading}
               error={composerMenu.error}
@@ -1026,6 +1050,13 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                     presentation={sendPresentation}
                     disabled={!canSend}
                     onSend={handleSend}
+                    onMultitask={
+                      !props.queuedEdit &&
+                      props.serverConfig?.environment.capabilities.multitask === true &&
+                      multitaskPermission
+                        ? () => void props.onStartMultitask()
+                        : undefined
+                    }
                   />
                 )}
               </View>
@@ -1121,6 +1152,13 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                       presentation={sendPresentation}
                       disabled={!canSend}
                       onSend={handleSend}
+                      onMultitask={
+                        !props.queuedEdit &&
+                        props.serverConfig?.environment.capabilities.multitask === true &&
+                        multitaskPermission
+                          ? () => void props.onStartMultitask()
+                          : undefined
+                      }
                     />
                   ) : null}
                 </View>

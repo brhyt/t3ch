@@ -6,17 +6,33 @@ import type {
   PullRequestContextMetadata,
   ScopedThreadRef,
   ServerProviderSkill,
+  ServerProviderSkillAction,
   ServerProviderSlashCommand,
 } from "@t3tools/contracts";
 import type { ComposerTriggerKind } from "@t3tools/shared/composerTrigger";
 import { memo } from "react";
-import { Pressable, ScrollView, StyleSheet, View, type ViewStyle } from "react-native";
+import { Pressable, ScrollView, StyleSheet, TextInput, View, type ViewStyle } from "react-native";
 
 import { SymbolView, type AppSymbolName } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
 import { GlassSurface } from "../../components/ui/GlassSurface";
 import { PierreEntryIcon } from "../../components/PierreEntryIcon";
 export type ComposerCommandItem =
+  | {
+      readonly id: string;
+      readonly type: "skill-action";
+      readonly skill: ServerProviderSkill;
+      readonly action: ServerProviderSkillAction;
+      readonly label: string;
+      readonly description: string;
+    }
+  | {
+      readonly id: string;
+      readonly type: "skill-base";
+      readonly skill: ServerProviderSkill;
+      readonly label: string;
+      readonly description: string;
+    }
   | {
       readonly id: string;
       readonly type: "pull-request";
@@ -62,6 +78,11 @@ export type ComposerCommandItem =
     };
 
 interface ComposerCommandPopoverProps {
+  readonly actionSearch?: {
+    readonly query: string;
+    readonly onChange: (value: string) => void;
+    readonly onBack: () => void;
+  };
   readonly items: ReadonlyArray<ComposerCommandItem>;
   readonly triggerKind: ComposerTriggerKind | null;
   readonly isLoading: boolean;
@@ -103,6 +124,8 @@ function itemIcon(item: ComposerCommandItem): AppSymbolName | null {
     case "slash-command":
     case "provider-slash-command":
       return "terminal";
+    case "skill-action":
+    case "skill-base":
     case "skill":
       return SKILL_SOURCE_SYMBOL_BY_KIND[resolveProviderSkillSourceKind(item.skill)];
     case "path":
@@ -196,6 +219,20 @@ export const ComposerCommandPopover = memo(function ComposerCommandPopover(
 
   return (
     <PopoverSurface>
+      {props.actionSearch ? (
+        <View className="px-4 py-2 gap-2">
+          <Pressable accessibilityLabel="Back to skills" onPress={props.actionSearch.onBack}>
+            <Text>Back to skills</Text>
+          </Pressable>
+          <TextInput
+            accessibilityLabel="Search skill actions"
+            placeholder="Search skill actions"
+            value={props.actionSearch.query}
+            onChangeText={props.actionSearch.onChange}
+            className="text-foreground"
+          />
+        </View>
+      ) : null}
       {label ? (
         <View className="px-3.5 pt-2.5 pb-1">
           <Text className="text-3xs font-t3-bold tracking-[0.8px] uppercase text-foreground-muted">

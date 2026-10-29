@@ -16,6 +16,8 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.previewDesign]: AuthFilesystemWriteScope,
 
   [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: AuthOrchestrationOperateScope,
+
+  [ORCHESTRATION_V2_WS_METHODS.startMultitask]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverRunStorageCleanup]: AuthSettingsWriteScope,
   [WS_METHODS.serverCheckOtlpEndpoint]: AuthSettingsWriteScope,
   [WS_METHODS.pullRequestsRunAction]: AuthSourceControlWriteScope,

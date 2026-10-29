@@ -16,7 +16,6 @@ import {
   EnvironmentId,
   ScheduledTaskId,
   WS_METHODS,
-  ORCHESTRATION_V2_WS_METHODS,
   type AuthSessionState,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -143,6 +142,26 @@ describe("command permissions", () => {
       }),
     ),
   );
+
+  it.effect("authorizes Multitask against its destination environment", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const multitask = createCommandPermissions(
+          runtime,
+          ORCHESTRATION_V2_WS_METHODS.startMultitask,
+        );
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        registry.set(sessions(other), AsyncResult.success(grant(false)));
+        expect(registry.get(multitask.permissionAtom(env))).toBe(true);
+        expect(registry.get(multitask.permissionAtom(other))).toBe(false);
+        yield* multitask.authorize(registry, env);
+        const denied = yield* multitask.authorize(registry, other).pipe(Effect.flip);
+        expect(denied._tag).toBe("EnvironmentAuthorizationError");
+      }),
+    ),
+  );
+
   it.effect("requires the destination settings grant to run storage cleanup", () =>
     Effect.scoped(
       Effect.gen(function* () {

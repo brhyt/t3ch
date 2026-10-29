@@ -39,6 +39,8 @@ import type {
   RuntimeRequestId,
   ScopedThreadRef,
   ServerProvider,
+  ServerProviderSkill,
+  ServerProviderSkillAction,
   ThreadId,
   SnapShotSource,
 } from "@t3tools/contracts";
@@ -275,6 +277,7 @@ import {
   type EnvironmentQueryTarget,
 } from "~/state/pullRequests";
 import { useEnvironmentQuery } from "~/state/query";
+import { useAtomValue } from "@effect/atom-react";
 import { useDebouncedValue } from "~/state/queries";
 import { ProviderModelPicker } from "./ProviderModelPicker";
 import { resolveModelPickerSelectedModel } from "./ModelPickerContent";
@@ -1120,7 +1123,10 @@ import { usePanelAnimationSettings } from "../../panelAnimations";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { readEnvironmentScope } from "../../state/session";
 import { serverEnvironment } from "../../state/server";
+import { threadEnvironment } from "../../state/threads";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
+import { SkillActionsDialog } from "./SkillActionsDialog";
+import { skillActionInsertion } from "./skillActionPicker";
 
 const WORKSPACE_SNAPSHOT_RETRY_COOLDOWN_MS = 10_000;
 
@@ -1368,6 +1374,8 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   preserveComposerFocusOnPointerDown?: boolean;
   isEditingQueuedMessage: boolean;
   onSubmitMessage: React.MouseEventHandler<HTMLButtonElement>;
+  onMultitask?: () => void;
+  canMultitask?: boolean;
   onResume: () => void;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
@@ -1413,6 +1421,8 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         preserveComposerFocusOnPointerDown={props.preserveComposerFocusOnPointerDown ?? false}
         isEditingQueuedMessage={props.isEditingQueuedMessage}
         onSubmitMessage={props.onSubmitMessage}
+        {...(props.onMultitask ? { onMultitask: props.onMultitask } : {})}
+        {...(props.canMultitask === undefined ? {} : { canMultitask: props.canMultitask })}
         onResume={props.onResume}
         onPreviousPendingQuestion={props.onPreviousPendingQuestion}
         onInterrupt={props.onInterrupt}
@@ -2359,6 +2369,33 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const [isComposerFooterCompact, setIsComposerFooterCompact] = useState(false);
   const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false);
   const [isComposerModelPickerOpen, setIsComposerModelPickerOpen] = useState(false);
+  const [pendingSkillActions, setPendingSkillActions] = useState<{
+    readonly skill: ServerProviderSkill;
+    readonly rangeStart: number;
+    readonly rangeEnd: number;
+    readonly expectedText: string;
+    readonly prompt: string;
+  } | null>(null);
+  const [skillActionsDialog, setSkillActionsDialog] = useState<{
+    readonly request: NonNullable<typeof pendingSkillActions>;
+    readonly actions: ReadonlyArray<ServerProviderSkillAction>;
+  } | null>(null);
+  const skillActionsQuery = useEnvironmentQuery(
+    pendingSkillActions && selectedProviderEntry
+      ? serverEnvironment.providerSkillActions({
+          environmentId,
+          input: {
+            instanceId: selectedProviderEntry.instanceId,
+            ...(gitCwd ? { cwd: gitCwd } : {}),
+            skillName: pendingSkillActions.skill.name,
+          },
+        })
+      : null,
+  );
+  const canMultitask = useAtomValue(threadEnvironment.startMultitask.permissionAtom(environmentId));
+  const supportsMultitask =
+    useAtomValue(serverEnvironment.configValueAtom(environmentId))?.environment.capabilities
+      .multitask === true;
   const isMobileViewport = useMediaQuery("max-sm");
   const {
     isComposerFocused,
@@ -3757,6 +3794,37 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   };
   const applyPromptReplacementStable = useStableCallback(applyPromptReplacement);
 
+  const applySkillActionSelection = useStableCallback(
+    (
+      request: NonNullable<typeof pendingSkillActions>,
+      action: ServerProviderSkillAction | null,
+    ) => {
+      if (promptRef.current !== request.prompt) return false;
+      return applyPromptReplacementStable(
+        request.rangeStart,
+        request.rangeEnd,
+        skillActionInsertion(request.skill.name, action?.command),
+        { expectedText: request.expectedText },
+      );
+    },
+  );
+
+  useEffect(() => {
+    const request = pendingSkillActions;
+    if (!request || skillActionsQuery.isPending) return;
+    if (promptRef.current !== request.prompt) {
+      setPendingSkillActions(null);
+      return;
+    }
+    if (skillActionsQuery.isSuccess && (skillActionsQuery.data?.actions.length ?? 0) > 0) {
+      setSkillActionsDialog({ request, actions: skillActionsQuery.data?.actions ?? [] });
+      setPendingSkillActions(null);
+      return;
+    }
+    applySkillActionSelection(request, null);
+    setPendingSkillActions(null);
+  }, [applySkillActionSelection, pendingSkillActions, skillActionsQuery]);
+
   const readComposerSnapshot = (): {
     value: string;
     cursor: number;
@@ -3872,12 +3940,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         trigger.rangeEnd,
         replacement,
       );
-      const applied = applyPromptReplacement(trigger.rangeStart, replacementRangeEnd, replacement, {
+      setPendingSkillActions({
+        skill: item.skill,
+        rangeStart: trigger.rangeStart,
+        rangeEnd: replacementRangeEnd,
         expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd),
+        prompt: snapshot.value,
       });
-      if (applied) {
-        setComposerHighlightedItemId(null);
-      }
+      setComposerHighlightedItemId(null);
+      setComposerTrigger(null);
       return;
     }
     if (item.type === "pull-request") {
@@ -4044,6 +4115,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
   };
   const submitComposerStable = useStableCallback(submitComposer);
+  const handleMultitask = useStableCallback(() => {
+    submitComposer(undefined, undefined, "multitask");
+  });
   const handleSubmitMessage = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     submitComposer(
@@ -7324,6 +7398,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     preserveComposerFocusOnPointerDown={isMobileViewport || isComposerResting}
                     isEditingQueuedMessage={isEditingQueuedMessage}
                     onSubmitMessage={handleSubmitMessageStable}
+                    {...(supportsMultitask ? { onMultitask: handleMultitask } : {})}
+                    canMultitask={canMultitask}
                     onResume={onResume}
                     onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                     onInterrupt={handleInterruptPrimaryActionStable}
@@ -7366,6 +7442,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           </div>
         </ComposerSurface.Main>
       </div>
+      {skillActionsDialog ? (
+        <SkillActionsDialog
+          open
+          skill={skillActionsDialog.request.skill}
+          actions={skillActionsDialog.actions}
+          onOpenChange={(open) => {
+            if (!open) setSkillActionsDialog(null);
+          }}
+          onSelect={(action) => {
+            applySkillActionSelection(skillActionsDialog.request, action);
+            setSkillActionsDialog(null);
+          }}
+        />
+      ) : null}
     </form>
   );
 });
