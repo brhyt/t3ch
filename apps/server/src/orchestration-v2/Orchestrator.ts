@@ -11441,7 +11441,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             stored.event.payload.status === "cancelled" ||
             stored.event.payload.status === "rolled_back"),
       ),
-      Stream.runForEach(handleTerminalRun),
+      // Thread locks serialize each queue; a busy thread must not hold up other threads.
+      Stream.mapEffect(handleTerminalRun, { concurrency: "unbounded", unordered: true }),
+      Stream.runDrain,
       Effect.forkDetach,
     );
 
