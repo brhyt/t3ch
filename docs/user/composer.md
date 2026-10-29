@@ -49,6 +49,22 @@ also send files to T3 Code through another app's system share sheet.
 
 See [images and videos](#images-and-videos-in-messages) for previewing and saving media.
 
+## Design mode
+
+On web and desktop, open your project's development page in the browser panel and
+turn on **Design**. Select an element, then double-click its text or adjust a visual
+value. Supported changes save to source automatically without running an agent.
+Use Undo and Redo to step through saved edits; History survives reloads.
+
+Design mode v1 edits static JSX text and literal inline styles. Shared components
+change everywhere that source is used. Dynamic content and ambiguous source matches
+need an agent; attach a note instead. Your next message includes the net saved
+changes and pending notes, so the agent knows what you already changed.
+
+In Design mode, hover to find an element and use the ancestor buttons to select its containing card or section. Resize the inspector with its left edge. Linked spacing applies a value to all four sides; Undo restores the previous source values.
+
+Use Annotate to attach a note to the selected element, including when direct source editing is unavailable. Pending notes appear as numbered pins and in the inspector, where you can revisit or remove them. The composer's edit and note summary lets you review saved changes separately from instructions awaiting the agent.
+
 ## Send while the agent is working
 
 On web and desktop, choose **Settings → General → Follow-up behavior** to queue
@@ -338,3 +354,11 @@ including filenames or folders containing `#` or `?`.
 
 On mobile, select a PDF attachment or link to open it. iOS uses the native viewer;
 Android opens a compatible installed file viewer.
+
+### Workflow modes
+
+Open the workflow drawer beside the access-mode control to choose a workflow. Open **Workflow** from the panel's **+** menu to set agent-role overrides. Available modes come from the selected provider's installed `-mode` skills. The skill defines the workflow and default agent cast; explicit model choices are instructions to the agent, not an automatic dispatcher.
+
+Each message retains its workflow instructions and assignments. Messages with a workflow queue behind a running turn. Changing the selector affects future messages only; native slash commands keep their normal behavior. Next-turn preferences are saved on this client, while sent instructions travel with the thread.
+
+The Workflow panel shows recorded delegated tasks and their reported results. “Applied to turn” means the instructions were sent, not that every stage passed. Unavailable skills or assigned models must be resolved before sending.

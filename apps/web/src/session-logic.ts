@@ -629,7 +629,10 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
           id: item.id,
           createdAt,
           runId: item.runId,
-          label: item.summary,
+          label:
+            item.source.kind === "system"
+              ? item.summary.replace(/\bT3 Code\b/g, "T3CH")
+              : item.summary,
           tone: "info",
           itemType: item.type,
           structuredPayload: item,

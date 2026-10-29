@@ -30,6 +30,20 @@ beforeEach(() => {
 });
 
 describe("rightPanelStore", () => {
+  it("opens, closes, and reopens the workflow singleton without duplicating it", () => {
+    const store = useRightPanelStore.getState();
+    store.open(refA, "workflow");
+    store.open(refA, "workflow");
+    expect(useRightPanelStore.getState().byThreadKey["env-1:thread-A"]?.surfaces).toEqual([
+      { id: "workflow", kind: "workflow" },
+    ]);
+    store.closeSurface(refA, "workflow");
+    store.open(refA, "workflow");
+    expect(useRightPanelStore.getState().byThreadKey["env-1:thread-A"]?.activeSurfaceId).toBe(
+      "workflow",
+    );
+  });
+
   it("records single and bulk tab closes, newest first", () => {
     const store = useRightPanelStore.getState();
     const pr = pullRequestSurface({

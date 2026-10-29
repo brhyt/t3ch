@@ -1,3 +1,4 @@
+import { readWorkflowContext, workflowDisplayText } from "~/workflowConfig";
 import { ThreadFindTimelineContext } from "./ThreadFindProvider";
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
 import { MarkdownFindContext, useFindRevealRef } from "./markdownFindContext";
@@ -2394,7 +2395,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           className="me-1 text-2xs text-muted-foreground/70"
           data-user-message-attribution="t3code"
         >
-          Sent by T3 Code
+          Sent by T3CH
         </p>
       ) : userMessage.attribution === "agent" ? (
         <p className="me-1 text-2xs text-muted-foreground/70" data-user-message-attribution="agent">
@@ -2759,7 +2760,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
   return (
     <>
       <div className="relative min-w-0 px-1 py-0.5">
-        <MessageAuthorHeading>T3 Code</MessageAuthorHeading>
+        <MessageAuthorHeading>T3CH</MessageAuthorHeading>
         <div data-thread-find-text="true">
           <AssistantCitationSource
             messageId={row.message.id}
@@ -4773,18 +4774,34 @@ const UserMessageBody = memo(function UserMessageBody(props: {
   if (props.text.length === 0) {
     return null;
   }
+  const workflow = readWorkflowContext(props.text);
   return (
-    <ChatMarkdown
-      text={props.text}
-      cwd={props.markdownCwd}
-      threadRef={ctx.threadRef ?? undefined}
-      skills={props.skills}
-      className="text-foreground"
-      lineBreaks
-      parseRawHtml={false}
-      renderContextReference={props.renderContextReference}
-      headingLevelOffset={MESSAGE_HEADING_LEVEL}
-    />
+    <>
+      {workflow && (
+        <details className="mb-2 rounded-md border border-border p-2 text-xs">
+          <summary className="cursor-pointer">
+            Workflow: {workflow.skillName} · sent with this message
+          </summary>
+          <p className="mt-2 break-all text-muted-foreground">{workflow.skillPath}</p>
+          {Object.entries(workflow.assignments).map(([role, assignment]) => (
+            <p key={role} className="mt-1">
+              {role}: {assignment.providerInstanceId} / {assignment.model}
+            </p>
+          ))}
+        </details>
+      )}
+      <ChatMarkdown
+        text={workflowDisplayText(props.text)}
+        cwd={props.markdownCwd}
+        threadRef={ctx.threadRef ?? undefined}
+        skills={props.skills}
+        className="text-foreground"
+        lineBreaks
+        parseRawHtml={false}
+        renderContextReference={props.renderContextReference}
+        headingLevelOffset={MESSAGE_HEADING_LEVEL}
+      />
+    </>
   );
 });
 

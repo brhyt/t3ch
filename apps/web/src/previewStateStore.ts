@@ -15,6 +15,7 @@ import { appAtomRegistry } from "./rpc/atomRegistry";
 
 export interface DesktopPreviewOverlay {
   hasWebContents: boolean;
+  url: string | null;
   canGoBack: boolean;
   canGoForward: boolean;
   loading: boolean;
@@ -354,6 +355,7 @@ function isPreviewStateEqual(
     (previous !== null &&
       next !== null &&
       previous.hasWebContents === next.hasWebContents &&
+      previous.url === next.url &&
       previous.canGoBack === next.canGoBack &&
       previous.canGoForward === next.canGoForward &&
       previous.loading === next.loading &&

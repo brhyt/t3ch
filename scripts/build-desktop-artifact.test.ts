@@ -267,9 +267,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.equal(resolveDesktopUpdateChannel("0.0.17"), "latest");
   });
 
-  it("switches desktop packaging product names to nightly for nightly builds", () => {
-    assert.equal(resolveDesktopProductName("0.1.0"), "T3 Code (Beta)");
-    assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "T3 Code (Nightly)");
+  it("keeps the Brhyt product name for release and nightly builds", () => {
+    assert.equal(resolveDesktopProductName("0.1.0"), "Brhyt T3CH");
+    assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "Brhyt T3CH");
   });
 
   it("switches desktop packaging icons to the nightly artwork for nightly versions", () => {
@@ -454,6 +454,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   it("installs optional native dependencies for the target desktop architecture", () => {
     assert.deepStrictEqual(STAGE_INSTALL_ARGS, ["install", "--prod"]);
     assert.deepStrictEqual(createStageWorkspaceConfig({ platform: "mac", arch: "x64" }), {
+      packages: ["."],
       supportedArchitectures: {
         os: ["darwin"],
         cpu: ["x64"],
@@ -461,6 +462,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       packageExtensions: stagePackageExtensions,
     });
     assert.deepStrictEqual(createStageWorkspaceConfig({ platform: "linux", arch: "x64" }), {
+      packages: ["."],
       supportedArchitectures: {
         os: ["linux"],
         cpu: ["x64"],
@@ -469,6 +471,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       packageExtensions: stagePackageExtensions,
     });
     assert.deepStrictEqual(createStageWorkspaceConfig({ platform: "win", arch: "x64" }), {
+      packages: ["."],
       supportedArchitectures: {
         os: ["win32"],
         cpu: ["x64"],
@@ -476,6 +479,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       packageExtensions: stagePackageExtensions,
     });
     assert.deepStrictEqual(createStageWorkspaceConfig({ platform: "win", arch: "arm64" }), {
+      packages: ["."],
       supportedArchitectures: {
         os: ["win32"],
         cpu: ["arm64"],
@@ -483,6 +487,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       packageExtensions: stagePackageExtensions,
     });
     assert.deepStrictEqual(createStageWorkspaceConfig({ platform: "mac", arch: "universal" }), {
+      packages: ["."],
       supportedArchitectures: {
         os: ["darwin"],
         cpu: ["arm64", "x64"],
@@ -528,6 +533,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         },
       }),
       {
+        packages: ["."],
         supportedArchitectures: {
           os: ["linux"],
           cpu: ["x64"],
@@ -557,6 +563,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         overrides: {},
       }),
       {
+        packages: ["."],
         supportedArchitectures: {
           os: ["darwin"],
           cpu: ["arm64"],
@@ -682,7 +689,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         "**/*.map",
       ]);
       assert.deepStrictEqual(mac.dmg, {
-        title: "T3 Code (Beta) 1.2.3 Installer",
+        title: "Brhyt T3CH 1.2.3 Installer",
         background: "dmg/dmg-background-latest.png",
         window: { width: 640, height: 432 },
         contents: [
@@ -694,10 +701,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       });
       assert.deepStrictEqual((linux.linux as Record<string, unknown>).target, ["AppImage", "deb"]);
       assert.deepStrictEqual((linux.linux as Record<string, unknown>).protocols, [
-        { name: "T3 Code", schemes: ["t3code", "t3code-dev"] },
+        { name: "T3CH", schemes: ["t3code", "t3code-dev"] },
       ]);
       assert.deepStrictEqual((mac.mac as Record<string, unknown>).protocols, [
-        { name: "T3 Code", schemes: ["t3code", "t3code-dev"] },
+        { name: "T3CH", schemes: ["t3code", "t3code-dev"] },
         { name: "Web site URL", schemes: ["http", "https"], role: "Viewer" },
       ]);
       const macInfo = (mac.mac as { extendInfo: Record<string, unknown> }).extendInfo;
@@ -721,7 +728,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.propertyVal(
         (mac.mac as Record<string, unknown>).extendInfo as Record<string, unknown>,
         "NSLocalNetworkUsageDescription",
-        "T3 Code connects to devices on your local network for remote environments and commands run by terminals and coding agents.",
+        "T3CH connects to devices on your local network for remote environments and commands run by terminals and coding agents.",
       );
       for (const config of [linux, win]) {
         assert.deepStrictEqual(config.electronLanguages, DESKTOP_ELECTRON_LANGUAGES);
@@ -2106,7 +2113,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.equal(mac.provisioningProfile, "/tmp/t3code.provisionprofile");
       assert.match(String(mac.sign), /[\\/]scripts[\\/]sign-macos\.ts$/);
       assert.deepStrictEqual(mac.protocols, [
-        { name: "T3 Code", schemes: ["t3code", "t3code-dev"] },
+        { name: "T3CH", schemes: ["t3code", "t3code-dev"] },
         { name: "Web site URL", schemes: ["http", "https"], role: "Viewer" },
       ]);
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),

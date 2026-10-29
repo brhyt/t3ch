@@ -1,3 +1,5 @@
+import * as BrowserDesign from "./preview/BrowserDesign.ts";
+import * as DesignChanges from "./preview/DesignChanges.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import type { RelayManagedEndpointRuntimeConfig } from "@t3tools/contracts/relay";
 import * as Clock from "effect/Clock";
@@ -695,6 +697,12 @@ const layerMakeRoutes = Layer.mergeAll(
   // Both transports consume the same service instance, so caches single-flight across clients
   // and mutations observed on WebSocket invalidate patches subsequently read over HTTP.
   Layer.provide(layerPullRequestService),
+  Layer.provide(
+    BrowserDesign.layer.pipe(
+      Layer.provide(DesignChanges.layer.pipe(Layer.provide(layerWorkspaceEntries))),
+      Layer.provide(ProjectionStoreV2.layer),
+    ),
+  ),
   Layer.provide(ServerBrowser.layer.pipe(Layer.provide(DesktopBrowserChannel.layer))),
   Layer.provide(PreviewBrowser.layer),
   Layer.provide(PreviewAutomationBroker.layer),

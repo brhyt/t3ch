@@ -422,9 +422,24 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
       config.platform === "darwin" && !shellEnvironment.PATH
         ? yield* readLaunchctlPath
         : Option.none<string>();
+    // Finder supplies a minimal PATH. Shell startup can time out before CLI installers run.
+    const providerDirectories = config.env.HOME
+      ? [
+          `${config.env.HOME}/.local/bin`,
+          `${config.env.HOME}/.bun/bin`,
+          ...(config.platform === "darwin" ? ["/opt/homebrew/bin", "/usr/local/bin"] : []),
+        ]
+      : [];
+    const installedDirectories = yield* Effect.filter(providerDirectories, (directory) =>
+      fileSystem.stat(directory).pipe(
+        Effect.map((stat) => stat.type === "Directory"),
+        Effect.orElseSucceed(() => false),
+      ),
+    );
     const mergedPath = mergePaths(config.platform, [
       trimNonEmpty(shellEnvironment.PATH).pipe(Option.orElse(() => launchctlPath)),
       readEnvPath(config.env),
+      trimNonEmpty(installedDirectories.join(":")),
     ]);
 
     if (Option.isSome(mergedPath)) {

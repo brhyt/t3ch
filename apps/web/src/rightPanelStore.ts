@@ -13,6 +13,7 @@ import type { ThreadPanelPresentation } from "./rightPanelLayout";
 import type { ChatFileAttachment } from "./types";
 
 const RIGHT_PANEL_KINDS = [
+  "workflow",
   "diff",
   "files",
   "file",
@@ -43,6 +44,7 @@ export type RightPanelSurface =
       activeTerminalId: string;
       splitDirection?: "horizontal" | "vertical";
     }
+  | { id: "workflow"; kind: "workflow" }
   | { id: "diff"; kind: "diff" }
   | {
       id: "files";
@@ -206,6 +208,8 @@ const singletonSurface = (
   kind: Exclude<RightPanelKind, "file" | "preview" | "terminal" | "pull-request">,
 ): RightPanelSurface => {
   switch (kind) {
+    case "workflow":
+      return { id: "workflow", kind };
     case "diff":
       return { id: "diff", kind };
     case "files":

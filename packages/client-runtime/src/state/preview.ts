@@ -20,6 +20,12 @@ export function createPreviewEnvironmentAtoms<R, E>(
       JSON.stringify([environmentId, input.threadId]),
   };
   return {
+    design: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:preview:design",
+      tag: WS_METHODS.previewDesign,
+      scheduler: lifecycleScheduler,
+      concurrency: lifecycleConcurrency,
+    }),
     list: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:preview:list",
       tag: WS_METHODS.previewList,
