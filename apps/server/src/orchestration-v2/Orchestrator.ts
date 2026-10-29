@@ -6546,6 +6546,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const parentRun = parentProjection.runs.find(
         (candidate) => candidate.id === command.parentRunId,
       );
+      const exceeded = exceededDispatchModeLimit(parentProjection.thread, command);
+      if (exceeded !== undefined) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Delegated task ${exceeded} mode exceeds its parent thread limit.`,
+        });
+      }
       if (parentRun === undefined || !isBlockingRun(parentRun)) {
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
@@ -6736,7 +6744,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         senderThreadId: command.parentThreadId,
         messageId: childMessageId,
         text: command.task,
-        attachments: [],
+        attachments: command.attachments ?? [],
+        ...(command.context === undefined ? {} : { context: command.context }),
         modelSelection: command.modelSelection,
         dispatchMode:
           command.workspaceStrategy === undefined

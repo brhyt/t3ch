@@ -120,6 +120,7 @@ import * as ThreadManagementService from "./orchestration-v2/ThreadManagementSer
 import * as CommandOutputHub from "./orchestration-v2/CommandOutputHub.ts";
 import * as McpAppRequests from "./mcpApps/McpAppRequests.ts";
 import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManager.ts";
+import * as DelegatedTaskService from "./orchestration-v2/DelegatedTaskService.ts";
 import * as ThreadLaunchService from "./orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadMessageIntake from "./orchestration-v2/ThreadMessageIntake.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -1194,6 +1195,7 @@ const layerWsRpc = (
         }
       };
       const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
+      const delegatedTasks = yield* DelegatedTaskService.DelegatedTaskService;
       const commandOutputHub = yield* CommandOutputHub.CommandOutputHub;
       const providerSessionManager = yield* ProviderSessionManager.ProviderSessionManagerV2;
       const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
@@ -1787,6 +1789,9 @@ const layerWsRpc = (
       });
 
       const handlers = ServerWsRpcGroup.of({
+        [ORCHESTRATION_V2_WS_METHODS.startMultitask]: (input) => delegatedTasks.launch(input),
+        [WS_METHODS.serverGetProviderSkillActions]: (input) =>
+          providerRegistry.getSkillActions(input),
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           Effect.annotateCurrentSpan({
             "orchestration_v2.command_id": command.commandId,

@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   draft: { text: "Keep my draft", attachments: [] as DraftComposerImageAttachment[] },
   pendingRequests: { approvals: [], userInputs: [] } as PendingThreadRequests,
   enqueue: vi.fn(async () => undefined),
+  multitask: vi.fn(),
   clearDraft: vi.fn(),
   approve: vi.fn(),
   answer: vi.fn(),
@@ -43,8 +44,23 @@ vi.mock("react", () => ({
     vi.fn(),
   ],
 }));
+vi.mock("./multitask-retry", () => ({
+  loadOrCreateMultitaskRetry: async (_threadKey: string, key: string) => ({
+    key,
+    commandId: "uuid",
+    messageId: "uuid",
+  }),
+  clearMultitaskRetry: async () => {},
+}));
 vi.mock("expo-crypto", () => ({ randomUUID: () => "uuid" }));
-vi.mock("../lib/attachmentUpload", () => ({ prepareTurnAttachments: vi.fn() }));
+vi.mock("../lib/attachmentUpload", () => ({
+  prepareTurnAttachments: vi.fn(async () => ({
+    status: "ready",
+    attachments: [],
+    draftAttachments: state.draft.attachments,
+    pendingAttachmentIds: [],
+  })),
+}));
 vi.mock("../lib/uuid", () => ({ uuidv4: () => "uuid" }));
 vi.mock("./queued-run-edit", () => ({
   useQueuedRunEdit: () => null,
@@ -88,6 +104,10 @@ vi.mock("./threads", async () => {
   return {
     environmentThreadDetails: { queueWorkflowAtom: () => Atom.make(null) },
     threadEnvironment: {
+      startMultitask: Object.assign(state.multitask, {
+        permissionAtom: (environmentId: string) =>
+          Atom.make(state.grantedEnvironments.has(environmentId)),
+      }),
       respondToApproval: state.approve,
       respondToUserInput: state.answer,
       uploadFeedback: state.feedback,
@@ -164,6 +184,10 @@ beforeEach(() => {
     userInputs: [],
   };
   vi.clearAllMocks();
+  state.multitask.mockResolvedValue({
+    _tag: "Success",
+    value: { taskId: "parallel", childThreadId: "child", sequence: 1 },
+  });
   state.approve.mockResolvedValue(AsyncResult.success(undefined));
   state.answer.mockResolvedValue(AsyncResult.success(undefined));
   state.feedback.mockResolvedValue(AsyncResult.success({ feedbackId: "feedback" }));
@@ -256,5 +280,52 @@ describe("mobile task permissions", () => {
       environmentId: "secondary",
       input: { threadId: "thread", requestId: "input", answers: { language: "TypeScript" } },
     });
+  });
+});
+
+describe("mobile parallel submission", () => {
+  it("uses the parent environment permission and preserves an unauthorized draft", async () => {
+    await useThreadComposerState().onStartMultitask();
+    expect(state.multitask).not.toHaveBeenCalled();
+    expect(state.clearDraft).not.toHaveBeenCalled();
+  });
+  it("retries the same task identity after failure and clears only on acceptance", async () => {
+    state.grantedEnvironments.add("secondary");
+    state.multitask.mockResolvedValueOnce({ _tag: "Failure" });
+    const composer = useThreadComposerState();
+    await composer.onStartMultitask();
+    expect(state.clearDraft).not.toHaveBeenCalled();
+    await composer.onStartMultitask();
+    expect(state.multitask.mock.calls[0]?.[0]).toEqual(state.multitask.mock.calls[1]?.[0]);
+    expect(state.multitask).toHaveBeenLastCalledWith({
+      environmentId: "secondary",
+      input: {
+        commandId: "uuid",
+        messageId: "uuid",
+        parentThreadId: "thread",
+        text: "Keep my draft",
+        attachments: [],
+        modelSelection: { instanceId: "codex", model: "gpt-5.4" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        creationSource: "mobile",
+        isolation: "worktree",
+      },
+    });
+    expect(state.clearDraft).toHaveBeenCalledTimes(1);
+    expect(state.enqueue).not.toHaveBeenCalled();
+  });
+  it("preserves text edited while the parallel task is being accepted", async () => {
+    state.grantedEnvironments.add("secondary");
+    state.multitask.mockImplementationOnce(async () => {
+      state.draft = { text: "New work", attachments: [] };
+      return {
+        _tag: "Success",
+        value: { taskId: "parallel", childThreadId: "child", sequence: 1 },
+      };
+    });
+    await useThreadComposerState().onStartMultitask();
+    expect(state.clearDraft).not.toHaveBeenCalled();
+    expect(state.draft.text).toBe("New work");
   });
 });

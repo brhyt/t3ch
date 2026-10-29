@@ -13,7 +13,7 @@ import { resolveShortcutCommand, type ShortcutEventLike } from "./keybindings";
 
 export type ComposerTriggerKind = "path" | "pull-request" | "slash-command" | "skill";
 export type ComposerSlashCommand = "model" | "plan" | "default";
-export type ComposerSubmissionIntent = "foreground" | "background" | "alternate";
+export type ComposerSubmissionIntent = "foreground" | "background" | "alternate" | "multitask";
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;

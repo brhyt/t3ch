@@ -6,12 +6,14 @@ import {
   CheckpointScopeId,
   ORCHESTRATION_V2_WS_METHODS,
   OrchestrationV2CheckpointUnavailableError,
+  OrchestrationV2MultitaskError,
   WS_METHODS,
   type ChatAttachment,
   type MessageId,
   type ModelSelection,
   type NodeId,
   type OrchestrationV2Command,
+  type OrchestrationV2MultitaskInput,
   type OrchestrationV2CreationSource,
   type PlanId,
   type ProjectId,
@@ -33,7 +35,7 @@ import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 
-import { getInitialServerConfig, request } from "../rpc/client.ts";
+import { getInitialServerConfig, request, requestGuarded } from "../rpc/client.ts";
 
 interface CommandMetadata {
   readonly commandId?: CommandId;
@@ -616,6 +618,47 @@ export const setThreadInteractionMode = Effect.fn("EnvironmentCommands.setThread
     });
   },
 );
+
+export type StartMultitaskInput = Omit<OrchestrationV2MultitaskInput, "attachments"> & {
+  readonly messageId: MessageId;
+  readonly attachments: ReadonlyArray<
+    ChatAttachment | (UploadChatAttachment & { readonly id: string })
+  >;
+};
+
+export const startMultitask = Effect.fn("EnvironmentCommands.startMultitask")(function* (
+  input: StartMultitaskInput,
+) {
+  const attachments = yield* persistAttachments(
+    input.parentThreadId,
+    input.messageId,
+    input.attachments,
+  ).pipe(
+    Effect.mapError(
+      (cause) =>
+        new OrchestrationV2MultitaskError({
+          commandId: input.commandId,
+          parentThreadId: input.parentThreadId,
+          reason: "dispatch-failed",
+          message: "Attachments for the parallel task could not be prepared.",
+          cause,
+        }),
+    ),
+  );
+  const context = remapComposerContextAttachments(input.context, input.attachments, attachments);
+  return yield* requestGuarded(ORCHESTRATION_V2_WS_METHODS.startMultitask, {
+    commandId: input.commandId,
+    parentThreadId: input.parentThreadId,
+    text: input.text,
+    attachments,
+    ...(context ? { context } : {}),
+    ...(input.modelSelection ? { modelSelection: input.modelSelection } : {}),
+    ...(input.runtimeMode ? { runtimeMode: input.runtimeMode } : {}),
+    ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
+    creationSource: input.creationSource ?? "web",
+    isolation: input.isolation ?? "worktree",
+  });
+});
 
 export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(function* (
   input: StartThreadTurnInput,

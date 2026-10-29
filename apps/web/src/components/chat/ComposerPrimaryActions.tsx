@@ -47,6 +47,8 @@ interface ComposerPrimaryActionsProps {
   isEditingQueuedMessage?: boolean;
   onSubmitMessage?: MouseEventHandler<HTMLButtonElement>;
   onResume?: () => void;
+  onMultitask?: () => void;
+  canMultitask?: boolean;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
@@ -102,6 +104,8 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   isEditingQueuedMessage = false,
   onSubmitMessage,
   onResume,
+  onMultitask,
+  canMultitask = true,
   onPreviousPendingQuestion,
   onInterrupt,
   onImplementPlanInNewThread,
@@ -357,7 +361,38 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       <TooltipPopup>{submitTooltip}</TooltipPopup>
     </Tooltip>
   );
-  if (compactTokens === null) return submit;
+  const actions =
+    isRunning && hasSendableContent && !isEditingQueuedMessage && onMultitask ? (
+      <div className="flex items-center gap-2">
+        <Tooltip>
+          <TooltipTrigger render={<span className="inline-flex" />}>
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              {...pointerFocusProps}
+              disabled={
+                !canMultitask ||
+                isSendDisabled ||
+                isSendBusy ||
+                isConnecting ||
+                isEnvironmentUnavailable
+              }
+              onClick={onMultitask}
+            >
+              Multitask
+            </Button>
+          </TooltipTrigger>
+          <TooltipPopup>
+            Start this message as a parallel task in a new worktree. Your current task continues.
+          </TooltipPopup>
+        </Tooltip>
+        {submit}
+      </div>
+    ) : (
+      submit
+    );
+  if (compactTokens === null) return actions;
 
   return (
     <div data-chat-composer-compact-send="true" className="flex items-center gap-2">
@@ -390,7 +425,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             : `Next send compacts ${compactTokens} tokens first. Click to keep full history`}
         </TooltipPopup>
       </Tooltip>
-      {submit}
+      {actions}
     </div>
   );
 });

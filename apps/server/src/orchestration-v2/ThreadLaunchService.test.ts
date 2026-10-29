@@ -59,6 +59,7 @@ import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ThreadLaunch from "./ThreadLaunchService.ts";
 import * as OrchestratorMcpService from "../mcp/OrchestratorMcpService.ts";
+import * as DelegatedTaskServiceTestkit from "../mcp/DelegatedTaskService.testkit.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
 import * as ThreadTitleRegeneration from "./ThreadTitleRegenerationService.ts";
@@ -2921,6 +2922,7 @@ it.effect.each(
               ),
       });
       const layerService = OrchestratorMcpService.layer.pipe(
+        Layer.provide(DelegatedTaskServiceTestkit.layerFromThreadManagement),
         Layer.provide(NodeCrypto.layer),
         Layer.provide(harness.layer),
         Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({ resolveCommit })),

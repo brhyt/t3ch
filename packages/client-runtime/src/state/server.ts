@@ -1165,6 +1165,11 @@ export function createServerEnvironmentAtoms<R, E>(
           ]),
       },
     }),
+    providerSkillActions: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:provider-skill-actions",
+      tag: WS_METHODS.serverGetProviderSkillActions,
+      staleTimeMs: 30_000,
+    }),
     updateProvider: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:update-provider",
       tag: WS_METHODS.serverUpdateProvider,

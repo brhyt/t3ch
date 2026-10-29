@@ -72,6 +72,12 @@ running the send button shows which action it will take. Long-press it to use th
 other action for a single message, or hold `Cmd` while sending from a hardware
 keyboard. The button only offers Steer when the running agent supports it.
 
+Use **Multitask** while a turn is running to send your draft to a parallel child
+task. On mobile, long-press Send to find it. The child inherits conversation
+context and starts in its own worktree from the current commit; uncommitted
+changes stay in the original checkout. Open the child from the thread's agents
+to steer or stop it. Its result returns to the parent conversation.
+
 ## Queue messages offline on mobile
 
 Mobile keeps local copies of draft attachments, so you can preview them and queue
@@ -218,6 +224,10 @@ composer when it is empty, and is discarded otherwise.
 Type `/` for commands or `$` to add a skill from the selected environment and
 provider. On mobile, both are also available before starting a thread on
 **New task**.
+
+Selecting a skill with documented actions opens a searchable action picker.
+Choose an action such as `dg:judge`, or use the skill by itself. The selection
+inserts the exact command into your draft; add any arguments before sending.
 
 The slash menu also includes skills unless you turn off **Settings → General →
 Show skills in slash menu**. Only skills enabled for the provider are listed.

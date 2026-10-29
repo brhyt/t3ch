@@ -1594,6 +1594,7 @@ export function NewTaskDraftScreen(props: {
         <View className="mb-2">
           <ComposerCommandPopover
             items={composerMenu.items}
+            actionSearch={composerMenu.actionSearch}
             triggerKind={composerMenu.trigger.kind}
             isLoading={composerMenu.isLoading}
             error={composerMenu.error}

@@ -198,6 +198,7 @@ function makeRegistry(
       refresh: () => Ref.get(providersRef),
       refreshInstance: () => Ref.get(providersRef),
       refreshWorkspaceSnapshot: () => Ref.get(providersRef),
+      getSkillActions: () => Effect.succeed({ actions: [] }),
       getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
         Effect.succeed(lifecycleFor(provider)),
       setProviderMaintenanceActionState,
