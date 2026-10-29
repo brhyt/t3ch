@@ -2,6 +2,8 @@
 // Screencasts ignore emulated device scale; real 2x keeps captures sharp.
 // --disable-gpu uses cheaper software compositing while preserving SwiftShader WebGL.
 import {
+  BrowserDesignError,
+  type DesignPageCommand,
   BUILT_IN_BROWSER_PROFILES,
   DEFAULT_BROWSER_PROFILE_ID,
   FILL_PREVIEW_VIEWPORT,
@@ -58,6 +60,7 @@ import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Exit from "effect/Exit";
 import * as Scope from "effect/Scope";
+import { DESIGN_OVERLAY_SCRIPT } from "@t3tools/shared/browserDesignOverlay";
 import * as Stream from "effect/Stream";
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import type {
@@ -206,6 +209,11 @@ export interface ServerBrowserViewer {
 export class ServerBrowser extends Context.Service<
   ServerBrowser,
   {
+    readonly designPage: (input: {
+      readonly threadId: string;
+      readonly tabId: string;
+      readonly command: DesignPageCommand;
+    }) => Effect.Effect<unknown, BrowserDesignError>;
     readonly attachViewer: (input: {
       readonly threadId: string;
       readonly tabId: string;
@@ -2453,6 +2461,67 @@ const make = Effect.gen(function* () {
     });
 
   return ServerBrowser.of({
+    designPage: (input) =>
+      findTab(input.threadId, input.tabId).pipe(
+        Effect.mapError((cause) => new BrowserDesignError({ reason: "browser", cause })),
+        Effect.flatMap((tab) =>
+          Effect.tryPromise({
+            try: () =>
+              tab.control.system(async () => {
+                if (input.command.kind === "capture") {
+                  return withScreencastsPaused(tab, async () => {
+                    const viewport = tab.page.viewportSize() ?? { width: 1280, height: 800 };
+                    const scale = Math.min(1, 640 / (viewport.width * RENDER_SCALE));
+                    const data = await ServerBrowserPage.captureViewport(tab.page, tab.cdp, {
+                      format: "jpeg",
+                      quality: 50,
+                      scale,
+                    });
+                    const width = Math.round(viewport.width * RENDER_SCALE * scale);
+                    const height = Math.round(viewport.height * RENDER_SCALE * scale);
+                    return {
+                      dataUrl: `data:image/jpeg;base64,${data}`,
+                      width,
+                      height,
+                      cropRect: { x: 0, y: 0, width, height },
+                    };
+                  });
+                }
+                if (input.command.kind === "present") {
+                  await tab.page.evaluate(
+                    `window.__t3Design?.present(${JSON.stringify(input.command.state)})`,
+                  );
+                  return null;
+                }
+                if (input.command.kind === "refresh") {
+                  await tab.page.evaluate(
+                    `window.__t3Design?.refresh(${JSON.stringify(input.command)})`,
+                  );
+                  return null;
+                }
+                if (input.command.kind === "start" || input.command.kind === "poll") {
+                  await tab.page.evaluate(DESIGN_OVERLAY_SCRIPT);
+                }
+                const command = input.command;
+                if (command.kind === "start" && command.mode) {
+                  await tab.page.evaluate(
+                    `window.__t3Design?.showMode(${JSON.stringify(command.mode)})`,
+                  );
+                }
+                const expression =
+                  command.kind === "ack"
+                    ? `window.__t3Design?.ack(${JSON.stringify(command)})`
+                    : command.kind === "stop"
+                      ? "window.__t3Design?.stop() ?? true"
+                      : command.kind === "flush"
+                        ? "window.__t3Design?.flush() ?? null"
+                        : "window.__t3Design?.poll() ?? null";
+                return tab.page.evaluate(expression);
+              }),
+            catch: (cause) => new BrowserDesignError({ reason: "browser", cause }),
+          }),
+        ),
+      ),
     attachViewer,
     clearProfile,
     reportProfiles,

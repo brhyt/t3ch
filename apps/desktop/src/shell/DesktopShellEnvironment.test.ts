@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as PlatformError from "effect/PlatformError";
@@ -122,6 +123,22 @@ function runShellEnvironment(input: {
 }
 
 describe("DesktopShellEnvironment", () => {
+  it.effect("finds user-installed CLIs when shell startup returns no environment", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-provider-path-" });
+      yield* fs.makeDirectory(`${home}/.local/bin`, { recursive: true });
+      const env: NodeJS.ProcessEnv = { HOME: home, SHELL: "/bin/zsh", PATH: "/usr/bin:/bin" };
+      yield* runShellEnvironment({ env, platform: "darwin", handler: () => "" });
+      assert.ok(env.PATH?.startsWith("/usr/bin:/bin:"));
+      assert.ok(env.PATH?.split(":").includes(`${home}/.local/bin`));
+      assert.ok(!env.PATH?.split(":").includes(`${home}/.bun/bin`));
+      const before = env.PATH;
+      yield* runShellEnvironment({ env, platform: "darwin", handler: () => "" });
+      assert.equal(env.PATH, before);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("rejects PATH output from a failed shell and tries the next candidate", () =>
     Effect.gen(function* () {
       const env: NodeJS.ProcessEnv = { SHELL: "/bin/failing", PATH: "/usr/bin" };

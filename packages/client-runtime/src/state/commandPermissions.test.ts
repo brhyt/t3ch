@@ -7,6 +7,8 @@ import type { RpcSession } from "../rpc/session.ts";
 import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 import {
+  AuthFilesystemWriteScope,
+  AuthPreviewOperateScope,
   AuthOrchestrationOperateScope,
   AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
@@ -59,6 +61,36 @@ const setup = Effect.gen(function* () {
 });
 
 describe("command permissions", () => {
+  it.effect("requires both file writes and browser control for Design mode", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const design = createCommandPermissions(runtime, WS_METHODS.previewDesign);
+        registry.set(
+          sessions(env),
+          AsyncResult.success({
+            ...grant(false),
+            scopes: [AuthPreviewOperateScope],
+            permissions: [AuthPreviewOperateScope],
+          }),
+        );
+        expect(registry.get(design.permissionAtom(env))).toBe(false);
+        expect((yield* design.authorize(registry, env).pipe(Effect.flip))._tag).toBe(
+          "EnvironmentAuthorizationError",
+        );
+        registry.set(
+          sessions(env),
+          AsyncResult.success({
+            ...grant(false),
+            scopes: [AuthFilesystemWriteScope, AuthPreviewOperateScope],
+            permissions: [AuthFilesystemWriteScope, AuthPreviewOperateScope],
+          }),
+        );
+        expect(registry.get(design.permissionAtom(env))).toBe(true);
+        yield* design.authorize(registry, env);
+      }),
+    ),
+  );
   it.effect("requires the destination settings grant to run storage cleanup", () =>
     Effect.scoped(
       Effect.gen(function* () {

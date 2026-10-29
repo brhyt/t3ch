@@ -28,6 +28,18 @@ function state(navStatus: DesktopPreviewTabState["navStatus"]): DesktopPreviewTa
 }
 
 describe("projectDesktopState", () => {
+  it("retains the embedded browser URL across route and hash navigation", () => {
+    for (const url of [
+      "https://caribella.pages.dev/v3/",
+      "https://caribella.pages.dev/v3/menu/",
+      "https://caribella.pages.dev/v3/#visit",
+    ]) {
+      expect(projectDesktopState(state({ kind: "Success", url, title: "Caribella" })).url).toBe(
+        url,
+      );
+    }
+    expect(projectDesktopState(state({ kind: "Idle" })).url).toBeNull();
+  });
   it("shows a retained icon only while the current document has the captured origin", () => {
     expect(
       projectDesktopState(

@@ -92,6 +92,7 @@ import {
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { observeResize } from "~/lib/observeResize";
+import { DesignModeControls } from "./DesignModeControls";
 
 interface Props {
   threadRef: ScopedThreadRef;
@@ -146,6 +147,7 @@ export function PreviewView({
 }: Props) {
   const [focusUrlNonce, setFocusUrlNonce] = useState<number | undefined>(undefined);
   const [pickActive, setPickActive] = useState(false);
+  const [designActive, setDesignActive] = useState(false);
   const canSendAnnotation =
     useEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope) &&
     Boolean(onSendAnnotation);
@@ -219,7 +221,9 @@ export function PreviewView({
   const [serverFrameTabId, setServerFrameTabId] = useState<string | null>(null);
   const desktopOverlay = tabId ? (previewState.desktopByTabId[tabId] ?? null) : null;
   const navStatus = snapshot?.navStatus ?? { _tag: "Idle" as const };
-  const url = navStatus._tag === "Idle" ? "" : navStatus.url;
+  const url =
+    (!isServerTab && desktopOverlay?.hasWebContents ? desktopOverlay.url : null) ??
+    (navStatus._tag === "Idle" ? "" : navStatus.url);
   const loading = desktopOverlay?.loading ?? navStatus._tag === "Loading";
   const canGoBack = desktopOverlay?.canGoBack ?? snapshot?.canGoBack ?? false;
   const canGoForward = desktopOverlay?.canGoForward ?? snapshot?.canGoForward ?? false;
@@ -943,7 +947,7 @@ export function PreviewView({
         }
         onPickElement={previewBridge && tabId && !isServerTab ? handlePickElement : undefined}
         pickActive={pickActive}
-        pickDisabled={!tabId || isUnreachable}
+        pickDisabled={!tabId || isUnreachable || designActive}
         pickDisabledReason={
           isUnreachable ? "Page didn't load — pick unavailable until the page renders" : undefined
         }
@@ -984,6 +988,18 @@ export function PreviewView({
           ) : null
         }
       />
+
+      {tabId && serverOwnsRendering ? (
+        <DesignModeControls
+          key={runtimeTabId}
+          threadRef={threadRef}
+          tabId={tabId}
+          pageUrl={url}
+          disabled={isUnreachable || pickActive || !visible || !url}
+          hasControl={!serverInputDisabled}
+          onActiveChange={setDesignActive}
+        />
+      ) : null}
 
       <div ref={serverBodyRef} className="relative min-h-0 flex-1 overflow-hidden">
         {runtimeTabId && snapshot && isServerTab ? (
@@ -1034,7 +1050,7 @@ export function PreviewView({
           ) : (
             <div className="flex h-full items-center justify-center p-8 text-center">
               <p className="max-w-sm text-sm text-muted-foreground">
-                This tab is open in the T3 Code desktop app.
+                This tab is open in the T3CH desktop app.
               </p>
             </div>
           )

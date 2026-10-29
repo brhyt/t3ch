@@ -315,6 +315,7 @@ describe("previewStateStore (single-tab)", () => {
     });
     applyPreviewDesktopState(ref, snapshot.tabId, {
       hasWebContents: true,
+      url: null,
       canGoBack: true,
       canGoForward: false,
       loading: false,
@@ -336,6 +337,7 @@ describe("previewStateStore (single-tab)", () => {
     applyPreviewServerSnapshot(ref, snapshot);
     const overlay = {
       hasWebContents: true,
+      url: null,
       canGoBack: true,
       canGoForward: false,
       loading: false,
@@ -361,6 +363,8 @@ describe("previewStateStore (single-tab)", () => {
     unsubscribe();
 
     expect(updateCount).toBe(1);
+    applyPreviewDesktopState(ref, snapshot.tabId, { ...overlay, url: "https://example.com/menu/" });
+    expect(readThreadPreviewState(ref).desktopOverlay?.url).toBe("https://example.com/menu/");
   });
 
   it("retains multiple tabs and switches active desktop state", () => {
@@ -370,6 +374,7 @@ describe("previewStateStore (single-tab)", () => {
     applyPreviewServerSnapshot(ref, second);
     applyPreviewDesktopState(ref, first.tabId, {
       hasWebContents: true,
+      url: null,
       canGoBack: true,
       canGoForward: false,
       loading: false,
@@ -421,6 +426,7 @@ describe("previewStateStore (single-tab)", () => {
     applyPreviewServerSnapshot(ref, active);
     applyPreviewDesktopState(ref, stale.tabId, {
       hasWebContents: true,
+      url: null,
       canGoBack: false,
       canGoForward: false,
       loading: false,
@@ -551,6 +557,7 @@ describe("previewStateStore (single-tab)", () => {
     beginPreviewSessionClose(ref, previous.tabId);
     applyPreviewDesktopState(ref, previous.tabId, {
       hasWebContents: true,
+      url: null,
       canGoBack: false,
       canGoForward: false,
       loading: false,

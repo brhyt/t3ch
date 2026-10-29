@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useId } from "react";
 
-import { APP_STAGE_LABEL } from "../branding";
+import { APP_BASE_NAME, APP_STAGE_LABEL } from "../branding";
 import { resolveServerBackedAppStageLabel } from "../branding.logic";
 import { primaryServerConfigAtom } from "../state/server";
 
@@ -33,6 +33,8 @@ export function resolveEnvironmentIdentificationPillLabel(
 export function useEnvironmentStageLabel(): string {
   const primaryServerVersion =
     useAtomValue(primaryServerConfigAtom)?.environment.serverVersion ?? null;
+
+  if (APP_BASE_NAME === "Brhyt T3CH") return APP_STAGE_LABEL;
 
   return resolveServerBackedAppStageLabel({
     primaryServerVersion,

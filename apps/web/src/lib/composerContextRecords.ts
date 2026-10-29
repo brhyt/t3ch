@@ -105,6 +105,7 @@ export function pullRequestContextKindLabel(comment: ReviewCommentPresentation):
 }
 
 export function previewAnnotationContextLabel(annotation: PreviewAnnotationPayload): string {
+  if (annotation.id === "design-changes" && annotation.pageTitle) return annotation.pageTitle;
   const comment = annotation.comment.trim().replace(/\s+/g, " ");
   if (comment) {
     return comment.length > PREVIEW_LABEL_MAX_CHARS

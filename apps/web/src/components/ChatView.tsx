@@ -1,3 +1,6 @@
+import { WorkflowSelector, WorkflowPanel, WorkflowDrawerToggle } from "./chat/WorkflowControls";
+import { useWorkflowStore } from "~/workflowStore";
+import { appendWorkflowContext, workflowBlockReason } from "~/workflowConfig";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
@@ -2285,6 +2288,10 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeThreadKnownSessions]);
   const activeThreadRef = useActiveThreadRef(activeThread);
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+  const [workflowDrawerThreadKey, setWorkflowDrawerThreadKey] = useState<string | null>(null);
+  const workflowDrawerKey = activeThreadKey ?? routeThreadKey;
+  const workflowDrawerOpen = workflowDrawerThreadKey === workflowDrawerKey;
+  const workflowDrawerId = `workflow-drawer-${workflowDrawerKey}`;
   const activeEnvironmentServerBrowser = useEnvironmentSupportsServerBrowser(
     activeThreadRef?.environmentId ?? null,
   );
@@ -5258,6 +5265,9 @@ export default function ChatView(props: ChatViewProps) {
     useRightPanelStore.getState().open(activeThreadRef, "device");
   };
   const addDeviceSurfaceStable = useStableCallback(addDeviceSurface);
+  const addWorkflowSurfaceStable = useStableCallback(() => {
+    if (activeThreadRef) useRightPanelStore.getState().open(activeThreadRef, "workflow");
+  });
   const autoShowFloatingPreview = useClientSettings(selectAutoShowFloatingPreview);
   const previousDeviceSessions = useRef(new Map<string, Set<string>>());
   useEffect(() => {
@@ -8877,17 +8887,33 @@ export default function ChatView(props: ChatViewProps) {
       resumeCompactionTokens !== null &&
       !keepFullHistory &&
       messageTextForSend.toLowerCase() !== "/compact";
-    const turnDispatchMode = compactBeforeSend || sendQueuesBehindSetup ? "queue" : dispatchMode;
+    const workflowForSend =
+      useWorkflowStore.getState().byThread[activeThreadKey ?? routeThreadKey] ?? null;
+    const workflowNeedsNewTurn =
+      workflowForSend !== null && !messageTextForSend.trimStart().startsWith("/");
+    const turnDispatchMode =
+      compactBeforeSend || sendQueuesBehindSetup || workflowNeedsNewTurn ? "queue" : dispatchMode;
     const shouldQueueBehindActiveRun =
       compactBeforeSend ||
       sendQueuesBehindSetup ||
-      (phase === "running" && dispatchMode === "queue");
+      (phase === "running" && turnDispatchMode === "queue");
+    const workflowReason = messageTextForSend.trimStart().startsWith("/")
+      ? null
+      : workflowBlockReason(workflowForSend, timelineSkills, providerInstanceEntries);
+    if (workflowReason) {
+      setThreadError(threadIdForSend, workflowReason);
+      return;
+    }
+    const workflowMessageText = appendWorkflowContext(
+      messageTextForSend || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
+      workflowForSend,
+    );
     const outgoingMessageText = formatOutgoingPrompt({
       provider: ctxSelectedProvider,
       model: ctxSelectedModel,
       models: ctxSelectedProviderModels,
       effort: ctxSelectedPromptEffort,
-      text: messageTextForSend || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
+      text: workflowMessageText,
     });
     if (composerRef.current?.validateProviderInput(outgoingMessageText) === false) {
       return;
@@ -8918,6 +8944,17 @@ export default function ChatView(props: ChatViewProps) {
         setThreadError(threadIdForSend, `Provider for ${selection.model} is unavailable.`);
         return;
       }
+      const targetWorkflowReason = messageTextForSend.trimStart().startsWith("/")
+        ? null
+        : workflowBlockReason(
+            workflowForSend,
+            resolveProviderSkillsForCwd(provider.snapshot, gitCwd),
+            providerInstanceEntries,
+          );
+      if (targetWorkflowReason) {
+        setThreadError(threadIdForSend, targetWorkflowReason);
+        return;
+      }
       const providerBlockReason = getAntigravitySendBlockReason(provider.snapshot, selection.model);
       if (providerBlockReason) {
         setThreadError(threadIdForSend, providerBlockReason);
@@ -8936,7 +8973,7 @@ export default function ChatView(props: ChatViewProps) {
         model: selection.model,
         models: provider.models,
         effort: providerState.promptEffort,
-        text: messageTextForSend || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
+        text: workflowMessageText,
       });
       if (composerRef.current?.validateProviderInput(text) === false) return;
       multipleTargets.push({
@@ -10521,7 +10558,16 @@ export default function ChatView(props: ChatViewProps) {
   }
 
   const rightPanelContent = activeThreadRef ? (
-    renderedRightPanelSurface?.kind === "preview" ? (
+    renderedRightPanelSurface?.kind === "workflow" ? (
+      <WorkflowPanel
+        threadKey={activeThreadKey ?? routeThreadKey}
+        threadRef={activeThreadRef}
+        skills={timelineSkills}
+        providers={providerInstanceEntries}
+        messages={timelineMessages}
+        disabled={!canOperateThread}
+      />
+    ) : renderedRightPanelSurface?.kind === "preview" ? (
       <Suspense fallback={null}>
         <PreviewPanel
           mode="embedded"
@@ -10567,7 +10613,7 @@ export default function ChatView(props: ChatViewProps) {
     ) : renderedRightPanelSurface?.kind === "pull-request" && !supportsPullRequests ? (
       <PullRequestsUnavailableState
         title="Pull requests unavailable"
-        error="Update this environment's T3 Code server to browse pull requests."
+        error="Update this environment's T3CH server to browse pull requests."
       />
     ) : renderedRightPanelSurface?.kind === "pull-request" ? (
       <PullRequestDetailPanel
@@ -11160,6 +11206,17 @@ export default function ChatView(props: ChatViewProps) {
                           ) : null}
                           {!composerMounted ? null : (
                             <ChatComposer
+                              workflowDrawerToggle={
+                                <WorkflowDrawerToggle
+                                  expanded={workflowDrawerOpen}
+                                  drawerId={workflowDrawerId}
+                                  onToggle={() =>
+                                    setWorkflowDrawerThreadKey(
+                                      workflowDrawerOpen ? null : workflowDrawerKey,
+                                    )
+                                  }
+                                />
+                              }
                               canOperateThread={canOperateThread}
                               reportedModelSelection={reportedModelSelection}
                               multipleModelSelections={multipleModelSelections}
@@ -11398,6 +11455,25 @@ export default function ChatView(props: ChatViewProps) {
                       </div>
                     </ComposerSurface.Shell>
                     <div
+                      id={workflowDrawerId}
+                      role="region"
+                      aria-label="Workflow controls"
+                      hidden={!workflowDrawerOpen}
+                      className="relative mx-auto mt-1.5 w-[calc(100%-2.75rem)] max-w-[calc(var(--chat-content-max-width)-2.75rem)] rounded-2xl border border-border/50 bg-card dark:bg-surface-raised [html[data-theme-id]_&]:bg-(--app-theme-surface-raised)"
+                      data-composer-drawer-layer="true"
+                    >
+                      {composerMounted && workflowDrawerOpen && (
+                        <WorkflowSelector
+                          threadRef={activeThreadRef}
+                          threadKey={activeThreadKey ?? routeThreadKey}
+                          skills={timelineSkills}
+                          providers={providerInstanceEntries}
+                          disabled={!canOperateThread}
+                          onOpen={addWorkflowSurfaceStable}
+                        />
+                      )}
+                    </div>
+                    <div
                       aria-hidden
                       className="h-[calc(env(safe-area-inset-bottom)+1rem)] sm:h-[calc(env(safe-area-inset-bottom)+1.25rem)]"
                     />
@@ -11526,6 +11602,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddFiles={addFilesSurfaceStable}
           onAddPullRequest={addPullRequestSurfaceStable}
           onAddPullRequests={addPullRequestsSurfaceStable}
+          onAddWorkflow={addWorkflowSurfaceStable}
           onAddDevice={addDeviceSurfaceStable}
           browserAvailable={canOperatePreview && browserAvailable}
           terminalAvailable={activeProject !== null && canOperateTerminal}
@@ -11581,6 +11658,7 @@ export default function ChatView(props: ChatViewProps) {
             onAddFiles={addFilesSurfaceStable}
             onAddPullRequest={addPullRequestSurfaceStable}
             onAddPullRequests={addPullRequestsSurfaceStable}
+            onAddWorkflow={addWorkflowSurfaceStable}
             onAddDevice={addDeviceSurfaceStable}
             browserAvailable={canOperatePreview && browserAvailable}
             terminalAvailable={activeProject !== null && canOperateTerminal}

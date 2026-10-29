@@ -112,6 +112,7 @@ vi.mock("~/previewStateStore", () => ({
     desktopByTabId: {
       "tab-1": {
         hasWebContents: true,
+        url: null,
         canGoBack: false,
         canGoForward: false,
         loading: mocks.loading,
