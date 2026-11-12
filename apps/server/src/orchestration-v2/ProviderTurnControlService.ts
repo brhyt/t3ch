@@ -20,7 +20,10 @@ import * as Schema from "effect/Schema";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
-import { withConversationPromptContext } from "./ConversationPromptContext.ts";
+import {
+  ConversationPromptContextEnabled,
+  withConversationPromptContext,
+} from "./ConversationPromptContext.ts";
 
 const yieldToRuntime = Effect.yieldNow.pipe(
   Effect.andThen(
@@ -107,6 +110,7 @@ export const layer: Layer.Layer<
   Effect.gen(function* () {
     const projections = yield* ProjectionStore.ProjectionStoreV2;
     const sessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
+    const conversationContextEnabled = yield* ConversationPromptContextEnabled;
 
     const load = Effect.fn("ProviderTurnControlService.load")(function* (input: {
       readonly threadId: ThreadId;
@@ -402,6 +406,10 @@ export const layer: Layer.Layer<
             });
           }
           const thread = yield* projections.getThread(input.threadId);
+          const providerText = projectComposerContextForProvider({
+            text: message.text,
+            records: message.context?.records ?? [],
+          });
           yield* loaded.session.value
             .steerTurn({
               threadId: input.threadId,
@@ -413,14 +421,10 @@ export const layer: Layer.Layer<
                 : { modelSelection: input.modelSelection }),
               message: {
                 messageId: message.id,
-                text: withConversationPromptContext({
-                  text: projectComposerContextForProvider({
-                    text: message.text,
-                    records: message.context?.records ?? [],
-                  }),
-                  thread,
-                  message,
-                }),
+                text:
+                  !conversationContextEnabled || thread.lineage.sideChat === true
+                    ? providerText
+                    : withConversationPromptContext({ text: providerText, thread, message }),
                 attachments: message.attachments,
                 createdBy: message.createdBy,
                 creationSource: message.creationSource,

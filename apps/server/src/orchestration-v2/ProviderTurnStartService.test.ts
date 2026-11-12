@@ -1324,6 +1324,27 @@ effectIt.effect.each([
     }),
 );
 
+// Upstream replay fixtures ignore the topic note, so this is what proves it still reaches the provider.
+effectIt.effect.each([
+  { name: "main thread", sideChat: undefined, hasNote: true },
+  { name: "side chat", sideChat: { contextRun: "delivered" } as const, hasNote: false },
+] as const)("sends T3CH topic context to the provider for a $name", ({ sideChat, hasNote }) =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({
+      text: "Continue",
+      ...(sideChat === undefined
+        ? { previousTurn: { runStatus: "completed", turnStatus: "completed" } }
+        : { sideChat }),
+    });
+
+    yield* harness.start;
+
+    const sent = harness.startRootRun.mock.calls[0]?.[0].message.text ?? "";
+    expect(sent.startsWith("Continue")).toBe(true);
+    expect(sent.includes("<t3_conversation_context>")).toBe(hasNote);
+  }),
+);
+
 effectIt.effect.each([
   { nativeForkFrom: "idle", forks: true, transferStatus: "consumed", handoffIds: [] },
   {

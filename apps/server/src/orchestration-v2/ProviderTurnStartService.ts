@@ -57,7 +57,10 @@ import {
 } from "@t3tools/provider-core/server/failure";
 import * as RunExecutionService from "./RunExecutionService.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
-import { withConversationPromptContext } from "./ConversationPromptContext.ts";
+import {
+  ConversationPromptContextEnabled,
+  withConversationPromptContext,
+} from "./ConversationPromptContext.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 import {
   isRestartNoteContinuation,
@@ -164,6 +167,7 @@ export const layer: Layer.Layer<
   ProviderTurnStartServiceV2,
   Effect.gen(function* () {
     const eventSink = yield* EventSink.EventSinkV2;
+    const conversationContextEnabled = yield* ConversationPromptContextEnabled;
     const turnAnalytics = yield* ProviderUsageAnalytics.ProviderTurnAnalytics;
     const contextHandoffService = yield* ContextHandoffService.ContextHandoffServiceV2;
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
@@ -859,7 +863,7 @@ export const layer: Layer.Layer<
       });
       // Side chats are throwaway questions about the parent, not work to organize into topics.
       const userText =
-        goalCommand || projection.thread.lineage.sideChat === true
+        goalCommand || projection.thread.lineage.sideChat === true || !conversationContextEnabled
           ? providerText
           : withConversationPromptContext({
               text: providerText,

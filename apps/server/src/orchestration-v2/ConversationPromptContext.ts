@@ -2,6 +2,13 @@ import type {
   OrchestrationV2AppThread,
   OrchestrationV2ConversationMessage,
 } from "@t3tools/contracts";
+import * as Context from "effect/Context";
+
+/** Upstream's recorded replay prompts predate the topic note, so the replay harness turns it off. */
+export const ConversationPromptContextEnabled = Context.Reference<boolean>(
+  "t3ch/orchestration-v2/ConversationPromptContextEnabled",
+  { defaultValue: () => true },
+);
 
 export function withConversationPromptContext(input: {
   readonly text: string;

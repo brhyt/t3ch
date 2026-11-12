@@ -55,6 +55,7 @@ import * as CommandOutputRecorder from "./CommandOutputRecorder.ts";
 import * as ProviderSwitchService from "../ProviderSwitchService.ts";
 import * as ProviderTurnControlService from "../ProviderTurnControlService.ts";
 import * as ProviderTurnStartService from "../ProviderTurnStartService.ts";
+import { ConversationPromptContextEnabled } from "../ConversationPromptContext.ts";
 import * as ProviderTurnStartServiceTestkit from "../ProviderTurnStartService.testkit.ts";
 import * as McpAppModelContext from "../../mcpApps/McpAppModelContext.ts";
 import * as PreviewAgentActivity from "../../preview/PreviewAgentActivity.ts";
@@ -433,6 +434,7 @@ export function layerWithRegistry<Error>(
   const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        Layer.succeed(ConversationPromptContextEnabled, false),
         layerContextHandoffServiceProvided,
         layerEventSinkProvided,
         IdAllocator.layer,
@@ -449,7 +451,13 @@ export function layerWithRegistry<Error>(
     ),
   );
   const layerProviderTurnControlServiceProvided = ProviderTurnControlService.layer.pipe(
-    Layer.provide(Layer.merge(layerStores, layerProviderSessionManagerProvided)),
+    Layer.provide(
+      Layer.mergeAll(
+        layerStores,
+        layerProviderSessionManagerProvided,
+        Layer.succeed(ConversationPromptContextEnabled, false),
+      ),
+    ),
   );
   const layerRuntimeRequestServiceProvided = RuntimeRequestService.layer.pipe(
     Layer.provide(Layer.merge(layerStores, layerProviderSessionManagerProvided)),
