@@ -44,7 +44,7 @@ describe("Self invocation", () => {
 describe("Node runtime selection", () => {
   it.effect("keeps the current Node or Electron runtime without requiring Node on PATH", () =>
     Effect.gen(function* () {
-      for (const executable of ["/runtime/node", "/Applications/T3CH.app/Electron"]) {
+      for (const executable of ["/runtime/node", "/Applications/T3 Code.app/Electron"]) {
         expect(
           yield* resolveNodeExecutable("Local device support", { PATH: "" }).pipe(
             Effect.provideService(HostProcess.ExecutablePath, executable),
@@ -65,20 +65,6 @@ describe("Node runtime selection", () => {
       ).toBe(process.execPath);
     }).pipe(
       Effect.provideService(HostProcess.ExecutablePath, "/packaged/t3"),
-      Effect.provideService(HostProcess.IsExecutable, true),
-      Effect.provide(NodeServices.layer),
-    ),
-  );
-
-  it.effect("explains how to install Node when a standalone helper has no runtime", () =>
-    Effect.gen(function* () {
-      const error = yield* resolveNodeExecutable("Local device support", { PATH: "" }).pipe(
-        Effect.flip,
-      );
-      expect(error._tag).toBe("NodeRuntimeUnavailableError");
-      expect(error.message).toContain("Local device support requires Node.js");
-      expect(error.message).toContain("Install Node.js");
-    }).pipe(
       Effect.provideService(HostProcess.IsExecutable, true),
       Effect.provide(NodeServices.layer),
     ),

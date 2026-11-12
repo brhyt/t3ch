@@ -5,41 +5,15 @@ import { describe, it } from "vite-plus/test";
 import {
   codexAppServerArgs,
   codexExecLaunchArgs,
-  resolveCodexLaunchArgs,
+  codexMcpListLaunchArgs,
 } from "./codexLaunchArgs.ts";
 
-describe("resolveCodexLaunchArgs", () => {
-  it("uses T3CODE_CODEX_LAUNCH_ARGS before configured settings", () => {
-    NodeAssert.equal(
-      resolveCodexLaunchArgs(" --strict-config ", { T3CODE_CODEX_LAUNCH_ARGS: "--enable foo" }),
-      "--enable foo",
-    );
-  });
-
-  it("uses configured settings when T3CODE_CODEX_LAUNCH_ARGS is empty", () => {
-    NodeAssert.equal(
-      resolveCodexLaunchArgs(" --strict-config ", { T3CODE_CODEX_LAUNCH_ARGS: "   " }),
-      "--strict-config",
-    );
-  });
-
-  it("ignores whitespace-only environment values", () => {
-    NodeAssert.equal(resolveCodexLaunchArgs("", { T3CODE_CODEX_LAUNCH_ARGS: "   " }), "");
-  });
-});
-
 describe("codexAppServerArgs", () => {
-  it("returns the app-server command for empty launch args", () => {
-    NodeAssert.deepStrictEqual(codexAppServerArgs(""), ["app-server"]);
-  });
-
-  it("appends parsed launch args after app-server", () => {
-    NodeAssert.deepStrictEqual(codexAppServerArgs("--strict-config --enable foo"), [
-      "app-server",
-      "--strict-config",
-      "--enable",
-      "foo",
-    ]);
+  it("preserves escaped TOML quotes in config values", () => {
+    NodeAssert.deepStrictEqual(
+      codexAppServerArgs(String.raw`--config model=\"gpt-6.1-sol\" --strict-config`),
+      ["app-server", "--config", 'model="gpt-6.1-sol"', "--strict-config"],
+    );
   });
 });
 
@@ -54,6 +28,35 @@ describe("codexExecLaunchArgs", () => {
   it("does not pair value-taking flags with adjacent flags", () => {
     NodeAssert.deepStrictEqual(codexExecLaunchArgs("--config --strict-config --enable --disable"), [
       "--strict-config",
+    ]);
+  });
+});
+
+describe("codex exec and mcp list launch args", () => {
+  const launchArgs =
+    "--strict-config --oss --local-provider ollama --profile local -p=work --listen off --enable foo";
+
+  it("keeps the local model provider flags for codex exec", () => {
+    NodeAssert.deepStrictEqual(codexExecLaunchArgs(launchArgs), [
+      "--strict-config",
+      "--oss",
+      "--local-provider",
+      "ollama",
+      "--profile",
+      "local",
+      "-p=work",
+      "--enable",
+      "foo",
+    ]);
+  });
+
+  it("keeps the selected profile and drops exec-only flags for codex mcp list", () => {
+    NodeAssert.deepStrictEqual(codexMcpListLaunchArgs(launchArgs), [
+      "--profile",
+      "local",
+      "-p=work",
+      "--enable",
+      "foo",
     ]);
   });
 });

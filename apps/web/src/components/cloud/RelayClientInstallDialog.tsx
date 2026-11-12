@@ -12,6 +12,7 @@ import { Button } from "../ui/button";
 import {
   Dialog,
   DialogDescription,
+  DialogAction,
   DialogFooter,
   DialogHeader,
   DialogPanel,
@@ -69,8 +70,8 @@ export function RelayClientInstallDialog() {
           </DialogTitle>
           <DialogDescription>
             {isInstalling
-              ? "T3CH is preparing this environment for secure access through T3 Connect."
-              : "T3CH needs the relay client to make this environment available through T3 Connect."}
+              ? "T3 Code is preparing this environment for secure access through T3 Connect."
+              : "T3 Code needs the relay client to make this environment available through T3 Connect."}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel scrollFade={false}>
@@ -91,14 +92,14 @@ export function RelayClientInstallDialog() {
                 value={activeStepIndex + 1}
               />
               <p className="text-xs leading-relaxed text-muted-foreground">
-                Keep T3CH open while the relay client is installed.
+                Keep T3 Code open while the relay client is installed.
               </p>
             </div>
           ) : (
             <div className="rounded-xl border border-border/70 bg-muted/35 p-3">
               <p className="text-sm font-medium text-foreground">Managed relay client</p>
               <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                T3CH will download and install version{" "}
+                T3 Code will download and install version{" "}
                 {view.status === "confirming" ? view.version : ""} locally.
               </p>
             </div>
@@ -112,9 +113,9 @@ export function RelayClientInstallDialog() {
             >
               Cancel
             </Button>
-            <Button onClick={() => respondToRelayClientInstallConfirmation(true)}>
+            <DialogAction onClick={() => respondToRelayClientInstallConfirmation(true)}>
               Download and install
-            </Button>
+            </DialogAction>
           </DialogFooter>
         ) : null}
       </DialogPopup>

@@ -3,7 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": "./index.mjs",
+  "exports": {
+    ".": {
+      "types": "./index.d.mts",
+      "import": "./index.mjs"
+    }
+  },
   "dependencies": {
     "@babel/parser": "7.29.8",
     "@babel/types": "7.29.8",

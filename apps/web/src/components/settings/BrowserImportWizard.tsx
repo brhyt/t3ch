@@ -12,6 +12,7 @@ import {
   Dialog,
   DialogClose,
   DialogDescription,
+  DialogAction,
   DialogFooter,
   DialogHeader,
   DialogPanel,
@@ -75,10 +76,7 @@ export function BrowserImportWizard({
   );
   const [targetError, setTargetError] = useState<string>();
   const newProfileId = useRef(`profile-${randomUUID()}`);
-  // A second Import click before React has left the configure screen would
-  // start a second run; the parent refuses it, and applying that refusal here
-  // would drop the wizard out of the importing step while the first write is
-  // still going. The ref settles synchronously where state does not.
+  // Guard synchronously so a second click's refusal cannot leave the importing step during the first write.
   const importInFlight = useRef(false);
 
   const runImport = () => {
@@ -154,8 +152,11 @@ export function BrowserImportWizard({
           <BlockedStep
             source={source}
             reason={step.reason}
+            message={step.message}
             onClose={onClose}
-            onRetry={isRetryableReason(step.reason) ? runImport : undefined}
+            onRetry={
+              step.message === undefined && isRetryableReason(step.reason) ? runImport : undefined
+            }
           />
         ) : (
           <ConfigureStep
@@ -201,7 +202,7 @@ function QuitStep({
         <Button variant="outline" onClick={onCancel}>
           Cancel
         </Button>
-        <Button onClick={onRechecked}>I&rsquo;ve quit it</Button>
+        <DialogAction onClick={onRechecked}>I&rsquo;ve quit it</DialogAction>
       </DialogFooter>
     </>
   );
@@ -263,10 +264,10 @@ function FullDiskAccessStep({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Let T3CH read {source.name}&rsquo;s cookies</DialogTitle>
+        <DialogTitle>Let T3 Code read {source.name}&rsquo;s cookies</DialogTitle>
         <DialogDescription>
-          To import cookies from {source.name}, T3CH needs Full Disk Access. Turn it on in System
-          Settings, then come back to finish the import — you can revoke it again once the import is
+          To import cookies from {source.name}, T3 Code needs Full Disk Access. Turn it on in System
+          Settings, then come back to finish the import. You can revoke it again once the import is
           done.
         </DialogDescription>
       </DialogHeader>
@@ -297,8 +298,8 @@ function FullDiskAccessStep({
         {!permission.isReady(["fullDiskAccess"]) ? (
           <p className="mt-3 text-xs text-muted-foreground">
             {stillRequired
-              ? "Access is still required. Quit and reopen T3CH if you just allowed it, then retry the import."
-              : "If access doesn't update after you allow it, quit and reopen T3CH, then retry the import."}
+              ? "Access is still required. Quit and reopen T3 Code if you just allowed it, then retry the import."
+              : "If access doesn't update after you allow it, quit and reopen T3 Code, then retry the import."}
           </p>
         ) : null}
       </DialogPanel>
@@ -555,11 +556,13 @@ function DoneStep({
 function BlockedStep({
   source,
   reason,
+  message,
   onClose,
   onRetry,
 }: {
   readonly source: BrowserImportSource;
   readonly reason: keyof typeof BROWSER_IMPORT_FAILURE_COPY;
+  readonly message: string | undefined;
   readonly onClose: () => void;
   readonly onRetry: (() => void) | undefined;
 }) {
@@ -567,13 +570,13 @@ function BlockedStep({
     <>
       <DialogHeader>
         <DialogTitle>Couldn&rsquo;t import from {source.name}</DialogTitle>
-        <DialogDescription>{BROWSER_IMPORT_FAILURE_COPY[reason]}</DialogDescription>
+        <DialogDescription>{message ?? BROWSER_IMPORT_FAILURE_COPY[reason]}</DialogDescription>
       </DialogHeader>
       <DialogFooter>
         <Button variant="outline" onClick={onClose}>
           Close
         </Button>
-        {onRetry ? <Button onClick={onRetry}>Try again</Button> : null}
+        {onRetry ? <DialogAction onClick={onRetry}>Try again</DialogAction> : null}
       </DialogFooter>
     </>
   );

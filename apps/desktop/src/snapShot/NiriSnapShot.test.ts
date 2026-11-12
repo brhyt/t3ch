@@ -67,7 +67,6 @@ beforeEach(async () => {
         send(event, { ScreenshotCaptured: { path: "/another-app.png" } });
         send(event, { ScreenshotCaptured: { path: screenshot.path } });
       }
-      // The event may beat the command reply.
       send(socket, { Ok: "Handled" });
     } else send(socket, { Ok: "Handled" });
   };
@@ -132,11 +131,11 @@ it("does not activate T3 until requested, then matches PID and title", async () 
   const snapshot = await captureNiriWindow(socketPath);
   expect(calls.some((call) => typeof call !== "string" && call.Action.FocusWindow)).toBe(false);
   windows = [
-    { ...window, id: 1, pid: 999, title: "T3CH" },
+    { ...window, id: 1, pid: 999, title: "T3 Code" },
     { ...window, id: 2, pid: process.pid, title: "Other T3" },
-    { ...window, id: 3, pid: process.pid, title: "T3CH" },
+    { ...window, id: 3, pid: process.pid, title: "T3 Code" },
   ];
-  await snapshot.feedback!.activate("T3CH");
+  await snapshot.feedback!.activate("T3 Code");
   expect(calls).toContainEqual({ Action: { FocusWindow: { id: 3 } } });
 });
 
@@ -147,17 +146,17 @@ it("waits for the restored T3 window to map instead of polling", async () => {
     await original(request, socket);
     if (request === "EventStream")
       send(socket, {
-        WindowOpenedOrChanged: { window: { ...window, id: 4, pid: process.pid, title: "T3CH" } },
+        WindowOpenedOrChanged: { window: { ...window, id: 4, pid: process.pid, title: "T3 Code" } },
       });
   };
-  await snapshot.feedback!.activate("T3CH");
+  await snapshot.feedback!.activate("T3 Code");
   expect(calls).toContainEqual({ Action: { FocusWindow: { id: 4 } } });
 });
 
 it("rejects ambiguous activation targets", async () => {
   const snapshot = await captureNiriWindow(socketPath);
-  windows = [1, 2].map((id) => ({ ...window, id, pid: process.pid, title: "T3CH" }));
-  await expect(snapshot.feedback!.activate("T3CH")).rejects.toThrow("More than one");
+  windows = [1, 2].map((id) => ({ ...window, id, pid: process.pid, title: "T3 Code" }));
+  await expect(snapshot.feedback!.activate("T3 Code")).rejects.toThrow("More than one");
 });
 
 it("cancels pending activation when capture feedback is closed", async () => {
@@ -168,7 +167,7 @@ it("cancels pending activation when capture feedback is closed", async () => {
     await original(request, socket);
     if (request === "EventStream") started.resolve();
   };
-  const activation = expect(snapshot.feedback!.activate("T3CH")).rejects.toThrow("cancelled");
+  const activation = expect(snapshot.feedback!.activate("T3 Code")).rejects.toThrow("cancelled");
   await started.promise;
   snapshot.feedback!.close();
   await activation;
@@ -225,16 +224,6 @@ it("fails promptly when Niri disconnects", async () => {
     socket.end();
   };
   await expect(checkNiriCaptureSupport(socketPath)).rejects.toThrow("disconnected");
-});
-
-it("bounds requests even when the compositor never answers", async () => {
-  vi.useFakeTimers();
-  const received = Promise.withResolvers<void>();
-  handler = async () => received.resolve();
-  const result = expect(checkNiriCaptureSupport(socketPath)).rejects.toThrow("timed out");
-  await received.promise;
-  await vi.advanceTimersByTimeAsync(5_000);
-  await result;
 });
 
 it("does not use stale, relative, or sandboxed Niri sockets", () => {

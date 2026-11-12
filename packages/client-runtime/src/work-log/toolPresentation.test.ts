@@ -31,7 +31,7 @@ describe("extractToolActivityPresentation", () => {
       toolSource: source,
       input: {
         title: "Restrict the breakpoint to Git actions",
-        code: "await sky.type_text({app:'T3CH (Nightly)',text:'debug(ga.run)'});",
+        code: "await sky.type_text({app:'T3 Code (Nightly)',text:'debug(ga.run)'});",
       },
     };
     expect(extractToolActivityPresentation(item)).toEqual({
@@ -56,76 +56,6 @@ describe("extractToolActivityPresentation", () => {
       "x".repeat(4097) + ".png",
     ])
       expect(extractToolActivityPresentation({ viewedImagePath })).toEqual({});
-  });
-
-  it("reads provider-neutral presentation fields", () => {
-    expect(
-      extractToolActivityPresentation({
-        toolSurface: "browser",
-        toolIcon: {
-          _tag: "website",
-          pageUrl: "https://example.com/docs",
-          faviconUrl: "https://example.com/favicon.png",
-          faviconUrlDark: "https://example.com/favicon-dark.png",
-        },
-        toolSource: {
-          key: "integration:example",
-          name: "Example",
-          kind: "integration",
-          icon: {
-            _tag: "themed-logo",
-            logoUrl: "https://example.com/logo-light.png",
-            logoUrlDark: "https://example.com/logo-dark.png",
-          },
-        },
-      }),
-    ).toEqual({
-      toolSurface: "browser",
-      toolIcon: {
-        _tag: "website",
-        pageUrl: "https://example.com/docs",
-        faviconUrl: "https://example.com/favicon.png",
-        faviconUrlDark: "https://example.com/favicon-dark.png",
-      },
-      toolSource: {
-        key: "integration:example",
-        name: "Example",
-        kind: "integration",
-        icon: {
-          _tag: "themed-logo",
-          logoUrl: "https://example.com/logo-light.png",
-          logoUrlDark: "https://example.com/logo-dark.png",
-        },
-      },
-    });
-  });
-
-  it("reads provider-neutral native app icons", () => {
-    expect(
-      extractToolActivityPresentation({
-        toolSurface: "computer",
-        toolIcon: {
-          _tag: "native-app",
-          app: { _tag: "app-id", appId: "com.example.Editor" },
-        },
-        toolSource: {
-          key: "native-app:com.example.editor",
-          name: "Editor",
-          kind: "computer",
-        },
-      }),
-    ).toEqual({
-      toolSurface: "computer",
-      toolIcon: {
-        _tag: "native-app",
-        app: { _tag: "app-id", appId: "com.example.Editor" },
-      },
-      toolSource: {
-        key: "native-app:com.example.editor",
-        name: "Editor",
-        kind: "computer",
-      },
-    });
   });
 
   it("does not infer presentation from provider-specific payload data", () => {

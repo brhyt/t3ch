@@ -1,6 +1,6 @@
 import type { ServerProviderSkill, ServerProviderSkillAction } from "@t3tools/contracts";
 import { BlocksIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
 import { Command, CommandInput, CommandItem, CommandList } from "../ui/command";
@@ -15,10 +15,7 @@ export function SkillActionsDialog(props: {
   readonly onSelect: (action: ServerProviderSkillAction | null) => void;
 }) {
   const [query, setQuery] = useState("");
-  const visibleActions = useMemo(
-    () => filterSkillActions(props.actions, query),
-    [props.actions, query],
-  );
+  const visibleActions = filterSkillActions(props.actions, query);
   const skillLabel = formatProviderSkillDisplayName(props.skill);
 
   return (

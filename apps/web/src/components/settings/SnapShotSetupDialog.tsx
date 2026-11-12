@@ -30,7 +30,7 @@ const GNOME_ACCESS_COPY = {
   "not-installed": {
     title: "Install the extension",
     description:
-      "The T3CH GNOME extension lets you capture other windows and bring them into your draft. Sign out once after installing.",
+      "The T3 Code GNOME extension lets you capture other windows and bring them into your draft. Sign out once after installing.",
   },
   "restart-required": {
     title: "Extension installed",
@@ -46,7 +46,7 @@ const GNOME_ACCESS_COPY = {
   },
   disabled: {
     title: "Enable the extension",
-    description: "Enable T3CH SnapShots to start capturing windows.",
+    description: "Enable T3 Code SnapShots to start capturing windows.",
   },
   enabled: {
     title: "Capture is ready",
@@ -58,7 +58,7 @@ const GNOME_ACCESS_COPY = {
   },
   error: {
     title: "Couldn't set up the extension",
-    description: "Check T3CH SnapShots in GNOME Extensions, then try again.",
+    description: "Check T3 Code SnapShots in GNOME Extensions, then try again.",
   },
 };
 
@@ -138,11 +138,8 @@ export function SnapShotSetupDialog({
     if (busy) return;
     setChecking(true);
     setChecked(false);
-    try {
-      setChecked((await onRefresh()) !== undefined);
-    } finally {
-      setChecking(false);
-    }
+    const refreshed = await onRefresh().finally(() => setChecking(false));
+    setChecked(refreshed !== undefined);
   };
   const accessCopy =
     state.message && !macPermissions
@@ -174,7 +171,7 @@ export function SnapShotSetupDialog({
                       ? "Update the capture helper"
                       : "Allow snapshots",
                   description:
-                    "T3CH's capture helper lets you capture other apps and return to your draft. It's included with T3CH.",
+                    "T3 Code's capture helper lets you capture other apps and return to your draft. It's included with T3 Code.",
                 }
           : backend === "niri"
             ? {
@@ -355,7 +352,7 @@ export function SnapShotSetupDialog({
                     </p>
                   ))}
                   {step === "access" && (backend === "gnome" || helperBackend) ? (
-                    <p>Included with T3CH. No download needed.</p>
+                    <p>Included with T3 Code. No download needed.</p>
                   ) : null}
                   {step === "access" && backend === "gnome" && extension?.status === "enabled" ? (
                     <Button

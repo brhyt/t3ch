@@ -27,6 +27,7 @@ import * as Option from "effect/Option";
 
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ServerConfig from "../config.ts";
+import * as DocumentText from "../provider/DocumentText.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as AttachmentClaims from "./AttachmentClaims.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
@@ -174,7 +175,7 @@ const dispatchWasNotAccepted = (
 const make = Effect.gen(function* () {
   const ids = yield* IdAllocator.IdAllocatorV2;
   const attachmentContext = yield* Effect.context<
-    FileSystem.FileSystem | ServerConfig.ServerConfig
+    FileSystem.FileSystem | ServerConfig.ServerConfig | DocumentText.DocumentText
   >();
   const projects = yield* ProjectService.ProjectService;
   const git = yield* GitVcsDriver.GitVcsDriver;
