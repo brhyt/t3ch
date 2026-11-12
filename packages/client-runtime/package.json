@@ -7,6 +7,10 @@
       "types": "./src/threadConversations.ts",
       "default": "./src/threadConversations.ts"
     },
+    "./thread-todos": {
+      "types": "./src/threadTodos.ts",
+      "default": "./src/threadTodos.ts"
+    },
     "./assembly-highlighting": {
       "types": "./src/assemblyHighlighting.ts",
       "default": "./src/assemblyHighlighting.ts"
