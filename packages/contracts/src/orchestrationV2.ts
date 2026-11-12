@@ -61,6 +61,7 @@ import {
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
 } from "./checkpointDiff.ts";
+import { ProviderOptionSelections } from "./model.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import {
   ThreadLinkedPullRequest,
@@ -3755,6 +3756,19 @@ export const OrchestrationV2ThreadLaunchResult = Schema.Struct({
 });
 export type OrchestrationV2ThreadLaunchResult = typeof OrchestrationV2ThreadLaunchResult.Type;
 
+/**
+ * Where a user Multitask runs: the same concept as `delegate_task`'s target. Provider and model
+ * default to the composer's selection; an `environmentId` other than this one is a linked
+ * environment, where the task runs in that machine's project checkout.
+ */
+export const OrchestrationV2MultitaskTarget = Schema.Struct({
+  environmentId: Schema.optional(EnvironmentId),
+  providerInstanceId: Schema.optional(ProviderInstanceId),
+  model: Schema.optional(TrimmedNonEmptyString),
+  options: Schema.optional(ProviderOptionSelections),
+});
+export type OrchestrationV2MultitaskTarget = typeof OrchestrationV2MultitaskTarget.Type;
+
 export const OrchestrationV2MultitaskInput = Schema.Struct({
   commandId: CommandId,
   parentThreadId: ThreadId,
@@ -3766,12 +3780,15 @@ export const OrchestrationV2MultitaskInput = Schema.Struct({
   interactionMode: Schema.optional(ProviderInteractionMode),
   creationSource: Schema.optional(OrchestrationV2CreationSource),
   isolation: Schema.optional(Schema.Literals(["worktree", "shared"])),
+  target: Schema.optional(OrchestrationV2MultitaskTarget),
 });
 export type OrchestrationV2MultitaskInput = typeof OrchestrationV2MultitaskInput.Type;
 
 export const OrchestrationV2MultitaskResult = Schema.Struct({
   taskId: NodeId,
   childThreadId: ThreadId,
+  /** Set when the child runs in a linked environment: `childThreadId` is a thread there. */
+  childEnvironmentId: Schema.optional(EnvironmentId),
   sequence: NonNegativeInt,
 });
 export type OrchestrationV2MultitaskResult = typeof OrchestrationV2MultitaskResult.Type;
@@ -4090,6 +4107,10 @@ export class OrchestrationV2MultitaskError extends Schema.TaggedError<Orchestrat
       "worktree-unavailable",
       "dispatch-failed",
       "result-missing",
+      "provider-unavailable",
+      "model-unavailable",
+      "attachments-remote-unsupported",
+      "remote-delegation-failed",
     ]),
     message: Schema.String,
     cause: Schema.optional(Schema.Defect()),

@@ -214,6 +214,7 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
   onSubmitMessage: React.MouseEventHandler<HTMLButtonElement>;
   onMultitask?: () => void;
   canMultitask?: boolean;
+  multitaskTarget?: React.ReactNode;
   onResume: () => void;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
@@ -245,6 +246,7 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
         onSubmitMessage={props.onSubmitMessage}
         {...(props.onMultitask ? { onMultitask: props.onMultitask } : {})}
         {...(props.canMultitask === undefined ? {} : { canMultitask: props.canMultitask })}
+        {...(props.multitaskTarget === undefined ? {} : { multitaskTarget: props.multitaskTarget })}
         onResume={props.onResume}
         onPreviousPendingQuestion={props.onPreviousPendingQuestion}
         onInterrupt={props.onInterrupt}

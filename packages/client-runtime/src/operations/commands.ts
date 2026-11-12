@@ -710,6 +710,7 @@ export const startMultitask = Effect.fn("EnvironmentCommands.startMultitask")(fu
     ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
     creationSource: input.creationSource ?? "web",
     isolation: input.isolation ?? "worktree",
+    ...(input.target ? { target: input.target } : {}),
   });
 });
 

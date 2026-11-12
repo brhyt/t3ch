@@ -1,6 +1,7 @@
 import { useComposerAttachmentActions } from "./use-composer-attachment-actions";
 import * as Dialog from "../components/ui/Dialog";
 import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import { readEnvironmentScope } from "./session";
 import { useAtomValue } from "@effect/atom-react";
 import { compactBeforeSendTokens } from "@t3tools/client-runtime/state/context-window";
@@ -28,6 +29,7 @@ import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   MessageId,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
+  OrchestrationV2MultitaskError,
   orchestrationV2WorktreePending,
   type EnvironmentId,
   type ModelSelection,
@@ -131,6 +133,8 @@ import { enqueueThreadOutboxMessage } from "./thread-outbox";
 import { dispatchingQueuedMessageIdAtom, useThreadOutboxMessages } from "./use-thread-outbox";
 import { threadEnvironment } from "./threads";
 import { useAtomCommand } from "./use-atom-command";
+
+const isMultitaskError = Schema.is(OrchestrationV2MultitaskError);
 import { clearMultitaskRetry, loadOrCreateMultitaskRetry } from "./multitask-retry";
 import { orchestrationEnvironment } from "./orchestration";
 
@@ -607,7 +611,8 @@ export function useThreadComposerState(input: {
     scheduleUnusedComposerAttachmentCleanup(draft.attachments);
   };
 
-  const onStartMultitask = async () => {
+  /** `machine` is a linked environment to run the task on; omitted runs it on the thread's own. */
+  const onStartMultitask = async (machine?: EnvironmentId) => {
     const thread = selectedThreadShell;
     if (
       !thread ||
@@ -650,6 +655,7 @@ export function useThreadComposerState(input: {
       draft.context,
       modelSelection,
       runtimeMode,
+      machine ?? null,
     ]);
     multitaskBusyRef.current = true;
     try {
@@ -696,12 +702,16 @@ export function useThreadComposerState(input: {
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
           creationSource: "mobile",
           isolation: "worktree",
+          ...(machine === undefined ? {} : { target: { environmentId: machine } }),
         },
       });
       if (result._tag !== "Success") {
+        const failure = result._tag === "Failure" ? squashAtomCommandFailure(result) : null;
         setThreadComposerError(
           threadKey,
-          "Could not start the parallel task. Your draft is preserved; retry to resume it.",
+          isMultitaskError(failure)
+            ? `${failure.message} Your draft is preserved.`
+            : "Could not start the parallel task. Your draft is preserved; retry to resume it.",
         );
         return;
       }

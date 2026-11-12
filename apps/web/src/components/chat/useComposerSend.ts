@@ -101,6 +101,7 @@ import {
 } from "./composerSend.logic";
 import { useMultipleModelSend } from "./useMultipleModelSend";
 import { acknowledgeMultitaskRequest, multitaskRequest } from "./multitaskRequest";
+import { readMultitaskMachine } from "./MultitaskTargetMenu";
 import { useWorkflowStore } from "~/workflowStore";
 import { appendWorkflowContext, workflowBlockReason } from "~/workflowConfig";
 import { type ComposerDispatchMode } from "@t3tools/client-runtime/state/composer-dispatch";
@@ -861,12 +862,24 @@ export function useComposerSend(input: ComposerSendInput) {
       return;
     }
     const multitaskRequestKey = `t3-multitask:${environmentId}:${threadIdForSend}`;
+    const pickedMultitaskMachine = isMultitask
+      ? readMultitaskMachine(environmentId, threadIdForSend)
+      : null;
+    const multitaskMachine =
+      pickedMultitaskMachine !== null && linkedEnvironments.has(pickedMultitaskMachine)
+        ? pickedMultitaskMachine
+        : null;
     // A retried multitask reuses its command id, so the server starts the child only once.
     const parallelRequest = isMultitask
       ? multitaskRequest(
           sessionStorage,
           multitaskRequestKey,
-          JSON.stringify([submittedDraftSignature, ctxSelectedModelSelection, runtimeMode]),
+          JSON.stringify([
+            submittedDraftSignature,
+            ctxSelectedModelSelection,
+            runtimeMode,
+            multitaskMachine,
+          ]),
         )
       : null;
     const messageIdForSend = parallelRequest?.messageId ?? newMessageId();
@@ -1173,6 +1186,9 @@ export function useComposerSend(input: ComposerSendInput) {
                 modelSelection: ctxSelectedModelSelection,
                 runtimeMode,
                 interactionMode: DEFAULT_INTERACTION_MODE,
+                ...(multitaskMachine === null
+                  ? {}
+                  : { target: { environmentId: multitaskMachine } }),
               },
             });
       sendInFlightRef.current = false;
@@ -1196,12 +1212,18 @@ export function useComposerSend(input: ComposerSendInput) {
         if (turnUsesAttachmentUploads) releaseDraftAttachments(composerAttachmentsSnapshot);
       }
       setThreadError(threadIdForSend, null);
-      const child = scopeThreadRef(environmentId, result.value.childThreadId);
+      const childEnvironmentId = result.value.childEnvironmentId ?? environmentId;
+      const child = scopeThreadRef(childEnvironmentId, result.value.childThreadId);
+      const childMachine =
+        childEnvironmentId === environmentId ? null : linkedEnvironments.get(childEnvironmentId);
       toastManager.add(
         stackedThreadToast({
           type: "success",
           title: "Parallel task started",
-          description: "Your current task continues. The child starts in its own worktree.",
+          description:
+            childMachine === null
+              ? "Your current task continues. The child starts in its own worktree."
+              : `Your current task continues. The child runs on ${childMachine ?? "another machine"}.`,
           actionProps: {
             children: "Open task",
             onClick: () => {

@@ -61,6 +61,8 @@ interface ComposerPrimaryActionsProps {
   onResume?: () => void;
   onMultitask?: () => void;
   canMultitask?: boolean;
+  /** Where the Multitask runs, shown beside its button. */
+  multitaskTarget?: ReactNode;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
   compactBeforeSendTokens?: number | null;
@@ -119,6 +121,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   onResume,
   onMultitask,
   canMultitask = true,
+  multitaskTarget = null,
   onPreviousPendingQuestion,
   onInterrupt,
   compactBeforeSendTokens = null,
@@ -376,7 +379,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           </Button>
         </TooltipTrigger>
         <TooltipPopup>
-          Start this message as a parallel task in a new worktree. Your current task continues.
+          Start this message as a parallel task. Your current task continues.
         </TooltipPopup>
       </Tooltip>
     ) : null;
@@ -385,6 +388,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       <>
         {children}
         {multitask}
+        {multitask && multitaskTarget}
         {submit}
       </>,
     );
@@ -423,6 +427,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       </Tooltip>
       {children}
       {multitask}
+      {multitask && multitaskTarget}
       {submit}
     </div>,
   );

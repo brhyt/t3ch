@@ -5,6 +5,7 @@ import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 import * as PeerLinkRequests from "./peer/PeerLinkRequests.ts";
 import * as PeerLinks from "./peer/PeerLinks.ts";
+import * as RemoteDelegation from "./peer/RemoteDelegation.ts";
 
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -1444,6 +1445,7 @@ export const layerWsRpc = (
       };
       const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
       const delegatedTasks = yield* DelegatedTaskService.DelegatedTaskService;
+      const remoteDelegation = yield* RemoteDelegation.RemoteDelegation;
       const commandOutputHub = yield* CommandOutputHub.CommandOutputHub;
       const providerSessionManager = yield* ProviderSessionManager.ProviderSessionManagerV2;
       const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
@@ -1918,7 +1920,10 @@ export const layerWsRpc = (
       });
 
       const handlers = ServerWsRpcGroup.of({
-        [ORCHESTRATION_V2_WS_METHODS.startMultitask]: (input) => delegatedTasks.launch(input),
+        [ORCHESTRATION_V2_WS_METHODS.startMultitask]: (input) =>
+          delegatedTasks
+            .launch(input)
+            .pipe(Effect.provideService(RemoteDelegation.RemoteDelegation, remoteDelegation)),
         [WS_METHODS.serverGetProviderSkillActions]: (input) =>
           providerRegistry.getSkillActions(input),
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
@@ -3447,6 +3452,7 @@ export const layer = Layer.unwrap(
     const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
     const peerLinks = yield* PeerLinks.PeerLinks;
     const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
+    const remoteDelegation = yield* RemoteDelegation.RemoteDelegation;
     const sql = yield* SqlClient.SqlClient;
     return HttpRouter.add(
       "GET",
@@ -3522,6 +3528,7 @@ export const layer = Layer.unwrap(
               // Handler-context reporters see only request defects, not server-wide defects.
               Layer.provide(DefectReporter.layer),
               Layer.provide(Layer.succeed(SqlClient.SqlClient, sql)),
+              Layer.provide(Layer.succeed(RemoteDelegation.RemoteDelegation, remoteDelegation)),
               Layer.provide(AcpRegistrySessions.layer),
               Layer.provide(ProviderMaintenanceRunner.layer),
               Layer.provide(Layer.succeed(NpmRelease.NpmRelease, npmRelease)),

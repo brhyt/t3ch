@@ -131,7 +131,13 @@ Use **Multitask** while a turn is running to send your draft to a parallel child
 task. On mobile, long-press Send to find it. The child inherits conversation
 context and starts in its own worktree from the current commit; uncommitted
 changes stay in the original checkout. Open the child from the thread's agents
-to steer or stop it. Its result returns to the parent conversation.
+to steer or stop it. Its result returns to the parent conversation. The child
+uses the model selected in the composer.
+
+With Linked environments on, the menu beside Multitask (on mobile, the
+"Multitask on" entries) runs the child on a linked machine instead. It works in
+that machine's checkout of the same project rather than a new worktree, and
+attachments cannot go with it yet.
 
 ## Queue messages offline on mobile
 

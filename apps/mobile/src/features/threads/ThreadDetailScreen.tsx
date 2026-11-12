@@ -312,7 +312,7 @@ export interface ThreadDetailScreenProps {
   readonly onNativePasteText: (paste: ComposerTextPaste) => Promise<void>;
   readonly onRemoveDraftImage: (imageId: string) => void;
   readonly onStopThread: () => void;
-  readonly onStartMultitask?: () => Promise<void>;
+  readonly onStartMultitask?: (machine?: EnvironmentId) => Promise<void>;
   /** Present while the thread's queue is held. */
   readonly onResumeQueue: (() => Promise<void>) | null;
   readonly offersSideChat: boolean;

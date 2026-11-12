@@ -244,7 +244,7 @@ export interface ThreadComposerProps {
   readonly onNativePasteText: (paste: ComposerTextPaste) => Promise<void>;
   readonly onRemoveDraftImage: (imageId: string) => void;
   readonly onStopThread: () => void;
-  readonly onStartMultitask?: () => Promise<void>;
+  readonly onStartMultitask?: (machine?: EnvironmentId) => Promise<void>;
   /** Present while the thread's queue is held. */
   readonly onResumeQueue: (() => Promise<void>) | null;
   /** `stillSendable` reports whether the draft is unchanged after any wait before sending. */
@@ -294,6 +294,9 @@ const COMPOSER_ATTACHMENT_ENTERING =
 
 const AnimatedGlassSurface = Animated.createAnimatedComponent(GlassSurface);
 
+/** Menu action ids for a Multitask on a linked environment carry its id after this prefix. */
+const MULTITASK_ON = "multitask-on:";
+
 const FOLLOW_UP_ACTION_LABEL = {
   queue: "Queue",
   steer: "Steer now",
@@ -311,7 +314,9 @@ function SendActionButton(props: {
   readonly accessibilityLabel: string;
   readonly presentation: ComposerSendPresentation;
   readonly disabled: boolean;
-  readonly onMultitask?: () => void;
+  readonly onMultitask?: (machine?: EnvironmentId) => void;
+  /** Linked environments a Multitask can also run on. */
+  readonly multitaskMachines?: ReadonlyMap<EnvironmentId, string>;
   readonly onSend: (followUp?: ActiveTurnComposerAction) => void;
 }) {
   const { presentation } = props;
@@ -349,11 +354,22 @@ function SendActionButton(props: {
                 title: "Multitask",
                 subtitle: "Start parallel work in an isolated workspace",
               },
+              ...[...(props.multitaskMachines ?? [])].map(([environmentId, label]) => ({
+                id: `${MULTITASK_ON}${environmentId}`,
+                title: `Multitask on ${label}`,
+                subtitle: "Runs in that machine's checkout of this project",
+              })),
             ]
           : []),
       ]}
       onPressAction={({ nativeEvent }) => {
+        const machine = nativeEvent.event.startsWith(MULTITASK_ON)
+          ? [...(props.multitaskMachines?.keys() ?? [])].find(
+              (environmentId) => nativeEvent.event === `${MULTITASK_ON}${environmentId}`,
+            )
+          : undefined;
         if (nativeEvent.event === "multitask") props.onMultitask?.();
+        else if (machine !== undefined) props.onMultitask?.(machine);
         else if (
           nativeEvent.event === "queue" ||
           nativeEvent.event === "steer" ||
@@ -499,8 +515,9 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     !props.queuedEdit &&
     props.serverConfig?.environment.capabilities.multitask === true &&
     multitaskPermission
-      ? () => void startMultitask()
+      ? (machine?: EnvironmentId) => void startMultitask(machine)
       : undefined;
+  const linkedEnvironments = useLinkedEnvironments(props.environmentId);
   const attachmentsUploading =
     props.connectionState === "connected" &&
     composerAttachmentsStillUploading({
@@ -584,7 +601,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     environments: offersLinkedEnvironments(props.serverConfig)
       ? mentionableEnvironments
       : NO_MACHINES,
-    linkedEnvironments: useLinkedEnvironments(props.environmentId),
+    linkedEnvironments,
     currentThreadId: props.selectedThread.id,
     projectCwd: props.projectCwd,
     pullRequestProjectId: props.serverConfig ? (project?.id ?? null) : null,
@@ -1158,6 +1175,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                     disabled={!canSend}
                     onSend={handleSend}
                     onMultitask={onMultitask}
+                    multitaskMachines={linkedEnvironments}
                   />
                 )}
               </View>
@@ -1227,6 +1245,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                       disabled={!canSend}
                       onSend={handleSend}
                       onMultitask={onMultitask}
+                      multitaskMachines={linkedEnvironments}
                     />
                   ) : null}
                 </View>
