@@ -20,7 +20,7 @@ import {
   PencilIcon,
   PlusIcon,
 } from "lucide-react";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 import { randomUUID } from "~/lib/utils";
 import { Button } from "../ui/button";
@@ -336,10 +336,7 @@ export function ThreadConversationsBar(props: {
   readonly onMutate: (mutation: ThreadConversationMutation) => Promise<boolean>;
   readonly onOpenEvidence: (messageId: MessageId) => void;
 }) {
-  const conversations = useMemo(
-    () => sortThreadConversations(props.conversations),
-    [props.conversations],
-  );
+  const conversations = sortThreadConversations(props.conversations);
   const selected =
     conversations.find((conversation) => conversation.id === props.selectedId) ?? null;
   const [editor, setEditor] = useState<ConversationEditorDraft | null>(null);
@@ -349,6 +346,7 @@ export function ThreadConversationsBar(props: {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const pillNodesRef = useRef(new Map<ThreadConversationId, HTMLButtonElement>());
   const previousPillPositionsRef = useRef(new Map<ThreadConversationId, number>());
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- animates reordered pill DOM nodes and scrolls the selected pill into view
   useLayoutEffect(() => {
     const nextPositions = new Map<ThreadConversationId, number>();
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;

@@ -7,7 +7,8 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { Redo2, Undo2, Palette, MessageSquare } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useStableCallback } from "~/hooks/useStableCallback";
 import { dataUrlToFile } from "~/lib/imageCompression";
 import { randomUUID } from "~/lib/utils";
 import { Button } from "~/components/ui/button";
@@ -32,13 +33,10 @@ export function DesignModeControls({
   readonly hasControl: boolean;
   readonly onActiveChange: (active: boolean) => void;
 }) {
-  const threadRef = useMemo(
-    () => ({
-      environmentId: incomingThreadRef.environmentId,
-      threadId: incomingThreadRef.threadId,
-    }),
-    [incomingThreadRef.environmentId, incomingThreadRef.threadId],
-  );
+  const threadRef = {
+    environmentId: incomingThreadRef.environmentId,
+    threadId: incomingThreadRef.threadId,
+  };
   const thread = useThreadShell(threadRef);
   const project = useProject(
     thread ? { environmentId: threadRef.environmentId, projectId: thread.projectId } : null,
@@ -69,138 +67,135 @@ export function DesignModeControls({
   const seenNoteImages = useRef(new Set<string>());
   const [captureWarning, setCaptureWarning] = useState<string | null>(null);
   const latestSnapshot = useRef<BrowserDesignResult | null>(null);
-  const latestPageUrl = useRef(pageUrl);
-  useEffect(() => {
-    latestPageUrl.current = pageUrl;
-  }, [pageUrl]);
-  const run = useCallback(
-    async (operation: BrowserDesignInput["operation"]) => {
-      if (!cwd) return false;
-      const draft = useComposerDraftStore.getState().getComposerDraft(threadRef);
-      if (
-        operation !== "start" &&
-        lastContextVersion.current &&
-        !draft?.previewAnnotations.some((entry) => entry.id === annotationId)
-      ) {
-        const acknowledged = await execute({
-          environmentId: threadRef.environmentId,
-          input: {
-            threadId: threadRef.threadId,
-            tabId,
-            clientId,
-            operation: "acknowledge",
-            contextVersion: lastContextVersion.current,
-          },
-        });
-        if (acknowledged._tag !== "Success") return false;
-        lastContextVersion.current = null;
-        lastChanges.current = null;
-        sessionStorage.removeItem(contextKey);
-      }
-      const result = await execute({
+  // Stable so a page or thread re-render does not restart the sync loop below.
+  const run = useStableCallback(async (operation: BrowserDesignInput["operation"]) => {
+    if (!cwd) return false;
+    const draft = useComposerDraftStore.getState().getComposerDraft(threadRef);
+    if (
+      operation !== "start" &&
+      lastContextVersion.current &&
+      !draft?.previewAnnotations.some((entry) => entry.id === annotationId)
+    ) {
+      const acknowledged = await execute({
         environmentId: threadRef.environmentId,
         input: {
           threadId: threadRef.threadId,
           tabId,
           clientId,
-          operation,
-          ...(operation === "start" ? { mode: initialMode.current } : {}),
-          contextVersion: latestSnapshot.current?.contextVersion,
+          operation: "acknowledge",
+          contextVersion: lastContextVersion.current,
         },
       });
-      if (result._tag !== "Success") {
-        if (mounted.current)
-          setError("Designer disconnected. Turn Design off and on to reconnect this window.");
-        return false;
+      if (acknowledged._tag !== "Success") return false;
+      lastContextVersion.current = null;
+      lastChanges.current = null;
+      sessionStorage.removeItem(contextKey);
+    }
+    const result = await execute({
+      environmentId: threadRef.environmentId,
+      input: {
+        threadId: threadRef.threadId,
+        tabId,
+        clientId,
+        operation,
+        ...(operation === "start" ? { mode: initialMode.current } : {}),
+        contextVersion: latestSnapshot.current?.contextVersion,
+      },
+    });
+    if (result._tag !== "Success") {
+      if (mounted.current)
+        setError("Designer disconnected. Turn Design off and on to reconnect this window.");
+      return false;
+    }
+    const next = {
+      ...result.value,
+      notes: result.value.notes.map((note) => {
+        const previous = latestSnapshot.current?.notes.find((entry) => entry.id === note.id);
+        return !note.screenshot && previous?.screenshot
+          ? { ...note, screenshot: previous.screenshot }
+          : note;
+      }),
+    };
+    latestSnapshot.current = next;
+    const signature = JSON.stringify([next.changes, next.notes]);
+    const store = useComposerDraftStore.getState();
+    if (signature !== lastChanges.current) {
+      lastChanges.current = signature;
+      const imageIds = new Set(next.notes.map((note) => `design-note-${note.id}`));
+      for (const image of store.getComposerDraft(threadRef)?.images ?? []) {
+        if (image.id.startsWith("design-note-") && !imageIds.has(image.id))
+          store.removeImage(threadRef, image.id);
       }
-      const next = {
-        ...result.value,
-        notes: result.value.notes.map((note) => {
-          const previous = latestSnapshot.current?.notes.find((entry) => entry.id === note.id);
-          return !note.screenshot && previous?.screenshot
-            ? { ...note, screenshot: previous.screenshot }
-            : note;
-        }),
-      };
-      latestSnapshot.current = next;
-      const signature = JSON.stringify([next.changes, next.notes]);
-      const store = useComposerDraftStore.getState();
-      if (signature !== lastChanges.current) {
-        lastChanges.current = signature;
-        const imageIds = new Set(next.notes.map((note) => `design-note-${note.id}`));
-        for (const image of store.getComposerDraft(threadRef)?.images ?? []) {
-          if (image.id.startsWith("design-note-") && !imageIds.has(image.id))
-            store.removeImage(threadRef, image.id);
+      for (const note of next.notes) {
+        const imageId = `design-note-${note.id}`;
+        if (!note.screenshot || seenNoteImages.current.has(imageId)) continue;
+        seenNoteImages.current.add(imageId);
+        if (store.getComposerDraft(threadRef)?.images.some((image) => image.id === imageId))
+          continue;
+        try {
+          const file = dataUrlToFile(note.screenshot.dataUrl, `${imageId}.jpg`, "image/jpeg");
+          const added = store.addImage(threadRef, {
+            type: "image",
+            id: imageId,
+            name: file.name,
+            mimeType: file.type,
+            sizeBytes: file.size,
+            previewUrl: note.screenshot.dataUrl,
+            file,
+          });
+          if (!added)
+            setCaptureWarning("Note saved. The composer could not accept its screenshot.");
+        } catch {
+          setCaptureWarning("Note saved, but its screenshot could not be attached.");
         }
-        for (const note of next.notes) {
-          const imageId = `design-note-${note.id}`;
-          if (!note.screenshot || seenNoteImages.current.has(imageId)) continue;
-          seenNoteImages.current.add(imageId);
-          if (store.getComposerDraft(threadRef)?.images.some((image) => image.id === imageId))
-            continue;
-          try {
-            const file = dataUrlToFile(note.screenshot.dataUrl, `${imageId}.jpg`, "image/jpeg");
-            const added = store.addImage(threadRef, {
-              type: "image",
-              id: imageId,
-              name: file.name,
-              mimeType: file.type,
-              sizeBytes: file.size,
-              previewUrl: note.screenshot.dataUrl,
-              file,
-            });
-            if (!added)
-              setCaptureWarning("Note saved. The composer could not accept its screenshot.");
-          } catch {
-            setCaptureWarning("Note saved, but its screenshot could not be attached.");
-          }
-        }
-        if (next.changes.length > 0 || next.notes.length > 0) {
-          store.addPreviewAnnotation(
-            threadRef,
-            designChangesAnnotation(annotationId, latestPageUrl.current, {
-              ...next,
-              notes: next.notes.map((note) => {
-                if (
-                  useComposerDraftStore
-                    .getState()
-                    .getComposerDraft(threadRef)
-                    ?.images.some((image) => image.id === `design-note-${note.id}`)
-                )
-                  return note;
-                const { screenshot: _screenshot, ...withoutImage } = note;
-                return withoutImage;
-              }),
+      }
+      if (next.changes.length > 0 || next.notes.length > 0) {
+        store.addPreviewAnnotation(
+          threadRef,
+          designChangesAnnotation(annotationId, pageUrl, {
+            ...next,
+            notes: next.notes.map((note) => {
+              if (
+                useComposerDraftStore
+                  .getState()
+                  .getComposerDraft(threadRef)
+                  ?.images.some((image) => image.id === `design-note-${note.id}`)
+              )
+                return note;
+              const { screenshot: _screenshot, ...withoutImage } = note;
+              return withoutImage;
             }),
-            { insertAtCaret: false },
-          );
-          lastContextVersion.current = next.contextVersion;
-          sessionStorage.setItem(contextKey, next.contextVersion);
-        } else {
-          lastContextVersion.current = null;
-          sessionStorage.removeItem(contextKey);
-          store.removePreviewAnnotation(threadRef, annotationId);
-        }
+          }),
+          { insertAtCaret: false },
+        );
+        lastContextVersion.current = next.contextVersion;
+        sessionStorage.setItem(contextKey, next.contextVersion);
+      } else {
+        lastContextVersion.current = null;
+        sessionStorage.removeItem(contextKey);
+        store.removePreviewAnnotation(threadRef, annotationId);
       }
-      if (mounted.current) {
-        setSnapshot(next);
-        setError(null);
-      }
-      return true;
-    },
-    [annotationId, clientId, cwd, execute, contextKey, tabId, threadRef],
-  );
+    }
+    if (mounted.current) {
+      setSnapshot(next);
+      setError(null);
+    }
+    return true;
+  });
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- tracks unmount so in-flight design RPCs skip state updates.
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
     };
   }, []);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- holds the panel's design-active flag while mounted and clears it on unmount.
   useEffect(() => {
     onActiveChange(active);
     return () => onActiveChange(false);
   }, [active, onActiveChange]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- keeps the server design session alive with a poll timer and stops it on teardown.
   useEffect(() => {
     if (!active || !canWrite || !canPreview || disabled || !hasControl || !cwd) return;
     let cancelled = false;

@@ -349,7 +349,7 @@ const make = Effect.gen(function* () {
       )
       .pipe(Effect.tap(() => entries.refresh(scope.cwd)));
   const summarize = (history: History): DesignSnapshot => {
-    const changes = new Map<string, typeof DesignChange.Type>();
+    const changes = new Map<string, DesignChange>();
     for (const entry of history.entries.slice(0, history.cursor)) {
       const key = JSON.stringify([
         entry.selection.relativePath,

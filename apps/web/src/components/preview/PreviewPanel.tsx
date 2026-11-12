@@ -1,5 +1,3 @@
-"use client";
-
 import { useAtomRefresh } from "@effect/atom-react";
 import {
   AuthPreviewOperateScope,

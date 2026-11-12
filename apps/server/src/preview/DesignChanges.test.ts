@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - Match the source revision produced by the Vite plugin.
 import * as NodeCrypto from "node:crypto";
+import * as NodeCryptoLayer from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -21,7 +22,7 @@ const dependencies = WorkspaceEntries.layer.pipe(
 const layer = DesignChanges.layer.pipe(
   Layer.provideMerge(dependencies),
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-design-changes-" })),
-  Layer.provideMerge(NodeServices.layer),
+  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCryptoLayer.layer)),
 );
 const fixture = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;

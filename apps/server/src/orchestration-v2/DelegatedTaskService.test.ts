@@ -13,11 +13,11 @@ import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
 import * as ServerConfig from "../config.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as DocumentText from "../provider/DocumentText.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as DelegatedTaskService from "./DelegatedTaskService.ts";
@@ -96,20 +96,19 @@ it.effect("replays an accepted launch after its parent turn ends", () =>
       Layer.provide(configLayer),
       Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
       Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+      Layer.provide(Layer.mock(DocumentText.DocumentText)({})),
       Layer.provide(
         Layer.mock(CommandReceiptStore.CommandReceiptStoreV2)({
           getByCommandId: () =>
-            Effect.succeed(
-              Option.some({
-                commandId,
-                threadId: parentThreadId,
-                commandType: "delegated_task.request",
-                acceptedAt: now,
-                resultSequence: 41,
-                status: "accepted",
-                error: null,
-              }),
-            ),
+            Effect.succeedSome({
+              commandId,
+              threadId: parentThreadId,
+              commandType: "delegated_task.request",
+              acceptedAt: now,
+              resultSequence: 41,
+              status: "accepted",
+              error: null,
+            }),
         }),
       ),
       Layer.provide(
