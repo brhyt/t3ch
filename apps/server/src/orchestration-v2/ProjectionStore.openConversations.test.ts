@@ -82,7 +82,7 @@ it.effect("thread shells carry only open topics, so to-do lists need no thread l
         topic("wait", { status: "waiting", reason: "CI" }),
       ]),
     });
-    const open = ["decide", "wait"];
+    const open = ["decide", "wait"].map((id) => ThreadConversationId.make(id));
     assert.deepEqual(yield* shells, [open, open, open]);
 
     yield* store.apply({
