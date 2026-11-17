@@ -97,6 +97,13 @@ Conversation organization is saved on the thread's environment. It is available
 when that environment supports conversations; older environments keep the full
 thread view.
 
+On web and desktop, choose **To-dos** at the top of the sidebar to list every
+open conversation across your threads and machines, decisions first. Select one
+to open its thread on that conversation, mark it done from the list, or choose
+**Next** to work down the list. When more than one machine is connected, the
+machine menu beside it narrows both the thread list and the to-dos to one
+machine.
+
 ## Send while the agent is working
 
 On web and desktop, choose **Settings → Chat → Follow-up behavior** to queue

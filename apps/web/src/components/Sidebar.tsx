@@ -264,6 +264,9 @@ import {
   type SidebarSweepAction,
 } from "./sidebar/SidebarThreadRow";
 import { SidebarDraftBlock } from "./sidebar/SidebarDraftBlock";
+import { SidebarTodoList, SidebarViewBar } from "./sidebar/SidebarTodos";
+import { useSidebarTodosStore } from "../sidebarTodosStore";
+import { collectThreadTodos, resolveMachineFilter } from "@t3tools/client-runtime/thread-todos";
 import {
   SidebarProjectFolderHeader,
   sidebarFolderRowId,
@@ -1104,11 +1107,27 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           ),
         );
   const threads = useQuietThreadShells();
+  // T3CH: the to-dos view and the machine filter.
+  const sidebarView = useSidebarTodosStore((store) => store.view);
+  const setSidebarView = useSidebarTodosStore((store) => store.setView);
+  const chosenMachineId = useSidebarTodosStore((store) => store.machineEnvironmentId);
+  const setMachineEnvironmentId = useSidebarTodosStore((store) => store.setMachineEnvironmentId);
+  const machineFilter = resolveMachineFilter(chosenMachineId, connectedEnvironmentIds);
+  const machineThreads =
+    machineFilter === null
+      ? threads
+      : threads.filter((thread) => thread.environmentId === machineFilter);
+  const machineEnvironmentIds = machineFilter === null ? connectedEnvironmentIds : [machineFilter];
+  const machineServerConfigs =
+    machineFilter === null
+      ? serverConfigs
+      : new Map([...serverConfigs].filter(([environmentId]) => environmentId === machineFilter));
+  const todos = collectThreadTodos(threads, machineFilter);
   const promotingDraftThreadKeys = usePromotingDraftThreadKeys();
   const listedThreads =
     promotingDraftThreadKeys.length === 0
-      ? threads
-      : threads.map((thread) =>
+      ? machineThreads
+      : machineThreads.map((thread) =>
           promotingDraftThreadKeys.includes(threadShellKey(thread))
             ? asLaunchingThread(thread)
             : thread,
@@ -1194,7 +1213,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const scopedProjectRefs = scopedProjectGroups.flatMap((project) => project.memberProjectRefs);
   const scopedProjectKeys = revealWidensScope ? null : chosenScopeProjectKeys;
   const threadSearch = useThreadSearch(
-    connectedEnvironmentIds,
+    machineEnvironmentIds,
     threadSearchQuery,
     scopedProjectGroups.length === 0
       ? {}
@@ -1341,7 +1360,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   } = useSidebarThreads({
     projectScopeKey,
     scopedProjectKeys,
-    serverConfigs,
+    serverConfigs: machineServerConfigs,
     connectedEnvironmentIds,
     optimisticDrop,
     threads: listedThreads,
@@ -1460,6 +1479,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       params: buildThreadRouteParams(threadRef),
     });
   };
+
+  const openTodoThread = useStableCallback((threadRef: ScopedThreadRef) => {
+    void navigateToThread(threadRef);
+  });
 
   const handleThreadFileDrop = async (threadRef: ScopedThreadRef, files: File[]) => {
     const dropId = queuePendingFileDrop({ threadRef, files });
@@ -3231,6 +3254,21 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               activeSearchResultIndex={activeSearchResultIndex}
               onClearSearch={clearThreadSearch}
             />
+            <SidebarViewBar
+              view={sidebarView}
+              onViewChange={setSidebarView}
+              todoCount={todos.length}
+              machines={connectedEnvironmentIds.map((environmentId) => ({
+                environmentId,
+                label: environmentLabelById.get(environmentId) ?? environmentId,
+              }))}
+              machineEnvironmentId={machineFilter}
+              onMachineChange={(environmentId) => {
+                clearSelection();
+                setMachineEnvironmentId(environmentId);
+                scrollSidebarToTop(sidebarContentRef.current);
+              }}
+            />
           </SidebarGroup>
         }
       >
@@ -3313,7 +3351,22 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               </p>
             )
           ) : null}
-          {!isSearchingThreads ? (
+          {!isSearchingThreads && sidebarView === "todos" ? (
+            <TooltipProvider key="sidebar-todo-tooltips-150" delay={150} closeDelay={0}>
+              <SidebarTodoList
+                todos={todos}
+                routeThreadKey={routeThreadKey}
+                projectLabelByKey={projectDisplayNameByKey}
+                environmentLabelById={
+                  connectedEnvironmentIds.length > 1 && machineFilter === null
+                    ? environmentLabelById
+                    : null
+                }
+                onOpenThread={openTodoThread}
+              />
+            </TooltipProvider>
+          ) : null}
+          {!isSearchingThreads && sidebarView === "threads" ? (
             <TooltipProvider
               key="sidebar-thread-tooltips-150"
               delay={150}

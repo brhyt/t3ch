@@ -2128,6 +2128,10 @@ export type OrchestrationV2LatestVisibleMessageSummary =
   typeof OrchestrationV2LatestVisibleMessageSummary.Type;
 
 export const OrchestrationV2ThreadShell = Schema.Struct({
+  /** T3CH: the thread's topics that are not completed, so lists can show to-dos without loading threads. */
+  openConversations: Schema.optional(
+    Schema.Array(ThreadConversation).check(Schema.isMaxLength(100)),
+  ),
   ...OrchestrationV2CreationFields,
   id: ThreadId,
   projectId: ProjectId,

@@ -62,3 +62,10 @@ export const ThreadConversationMutation = Schema.Union([
   }),
 ]);
 export type ThreadConversationMutation = typeof ThreadConversationMutation.Type;
+
+/** Topics still needing attention; the shell carries only these. */
+export function openThreadConversations(
+  conversations: ReadonlyArray<ThreadConversation> | undefined,
+): ReadonlyArray<ThreadConversation> {
+  return (conversations ?? []).filter((conversation) => conversation.state.status !== "completed");
+}

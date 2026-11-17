@@ -34,6 +34,7 @@ import {
   type AssignableConversationExchange,
 } from "./chat/ThreadConversationsBar";
 import { orchestrationEnvironment } from "../state/orchestration";
+import { useThreadTopicFocusStore } from "../sidebarTodosStore";
 import { useComposerResume } from "./chat/useComposerResume";
 import { ThreadFind, ThreadFindCanvas } from "./chat/ThreadFindProvider";
 import { closeThreadFind, openThreadFind, useThreadFindOpen } from "./chat/threadFindStore";
@@ -1270,14 +1271,11 @@ export default function ChatView(props: ChatViewProps) {
   const supportsThreadConversations =
     isServerThread && serverConfig?.environment.capabilities.threadConversations === true;
   const threadConversations = serverProjection?.thread.conversations ?? [];
-  const [conversationSelection, setConversationSelection] = useState<{
-    readonly threadKey: string;
-    readonly conversationId: ThreadConversationId | null;
-  }>({ threadKey: routeThreadKey, conversationId: null });
-  const selectedConversationId =
-    supportsThreadConversations && conversationSelection.threadKey === routeThreadKey
-      ? conversationSelection.conversationId
-      : null;
+  const focusedConversationId = useThreadTopicFocusStore(
+    (store) => store.byThreadKey[routeThreadKey] ?? null,
+  );
+  const focusConversation = useThreadTopicFocusStore((store) => store.focus);
+  const selectedConversationId = supportsThreadConversations ? focusedConversationId : null;
   const assignableConversationExchanges: ReadonlyArray<AssignableConversationExchange> =
     serverVisibleTurnItems.flatMap(({ item }) =>
       item.type === "user_message" && item.createdBy === "user"
@@ -1287,7 +1285,7 @@ export default function ChatView(props: ChatViewProps) {
   const [conversationMutationError, setConversationMutationError] = useState<string | null>(null);
   const selectConversation = (conversationId: ThreadConversationId | null) => {
     setConversationMutationError(null);
-    setConversationSelection({ threadKey: routeThreadKey, conversationId });
+    focusConversation(routeThreadKey, conversationId);
   };
   const selectConversationStable = useStableCallback(selectConversation);
   const mutateConversation = async (conversationMutation: ThreadConversationMutation) => {
@@ -1313,17 +1311,14 @@ export default function ChatView(props: ChatViewProps) {
       return false;
     }
     if (conversationMutation.type === "create") {
-      setConversationSelection({
-        threadKey: routeThreadKey,
-        conversationId: conversationMutation.id,
-      });
+      focusConversation(routeThreadKey, conversationMutation.id);
     }
     return true;
   };
   const mutateConversationStable = useStableCallback(mutateConversation);
   const openConversationEvidence = (messageId: MessageId) => {
     if (activeThreadKey === null) return;
-    setConversationSelection({ threadKey: routeThreadKey, conversationId: null });
+    focusConversation(routeThreadKey, null);
     requestAnimationFrame(() => setTimelineAnchor({ threadKey: activeThreadKey, messageId }));
   };
   const openConversationEvidenceStable = useStableCallback(openConversationEvidence);
