@@ -1,4 +1,4 @@
-import { PrivacyJournal, PrivacyObserverError, type PrivacyRule } from "@t3tools/contracts";
+import { PrivacyJournal, PrivacyObserverError, PrivacyRule } from "@t3tools/contracts";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -13,6 +13,7 @@ const Connection = Schema.Struct({
   token: Schema.String.check(Schema.isMinLength(32), Schema.isMaxLength(256)),
 });
 const decodeConnection = Schema.decodeUnknownEffect(Schema.fromJsonString(Connection));
+const decodeRule = Schema.decodeUnknownEffect(PrivacyRule);
 const decodeJournal = Schema.decodeUnknownEffect(Schema.fromJsonString(PrivacyJournal));
 
 export class PrivacyObserver extends Context.Service<
@@ -62,9 +63,18 @@ const make = Effect.gen(function* () {
       );
     }),
     change: Effect.fn("PrivacyObserver.change")(function* (input) {
+      input = yield* decodeRule(input).pipe(
+        Effect.mapError(() => new PrivacyObserverError({ reason: "invalid_rule" })),
+      );
       if (
-        (input.action === "block" || input.action === "unblock") &&
-        (!input.host || !/^[A-Za-z0-9.-]{1,253}$/.test(input.host))
+        ["block", "unblock", "save-policy", "remove-policy", "start-experiment"].includes(
+          input.action,
+        ) &&
+        (!input.host ||
+          input.host.length > 253 ||
+          !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.?$/i.test(
+            input.host,
+          ))
       ) {
         return yield* new PrivacyObserverError({ reason: "invalid_rule" });
       }
@@ -74,6 +84,11 @@ const make = Effect.gen(function* () {
       ) {
         return yield* new PrivacyObserverError({ reason: "invalid_rule" });
       }
+      if (
+        (input.action === "start-experiment" && input.durationSeconds === undefined) ||
+        (["stop-experiment", "finish-experiment"].includes(input.action) && !input.experimentId)
+      )
+        return yield* new PrivacyObserverError({ reason: "invalid_rule" });
       yield* request(input);
     }),
   });

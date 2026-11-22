@@ -7,6 +7,7 @@ from time import time
 from urllib.parse import unquote_plus, parse_qsl
 
 from findings import Findings, RETENTION_DAYS
+from policy import Policies, ACTIONS
 
 SCAN_LIMIT = 1024 * 1024
 KNOWN_FIELDS = {"messages", "input", "prompt", "system", "tools", "model", "metadata", "contents", "events", "query", "projectId", "context"}
@@ -94,7 +95,8 @@ class Journal:
     def __init__(self, label, capacity=2000, findings_path=None, retention_days=RETENTION_DAYS):
         self.label = label[:128]
         self.events = deque(maxlen=capacity)
-        self.blocked = set()
+        self.policies = Policies(findings_path)
+        self.event_experiments = {}
         self.lock = RLock()
         self.total = 0
         self.started_at = time()
@@ -116,8 +118,11 @@ class Journal:
             item = {"id": self.total, "time": self.last_observed_at, "source": self.label, "host": host,
                     "method": method, "status": status, "category": category(host, summary["fields"]), **summary}
             if len(self.events) == self.events.maxlen:
+                self._discard_outcomes((self.events[0],))
                 self.event_issues.pop(self.events[0]["id"], None)
+                self.event_experiments.pop(self.events[0]["id"], None)
             self.events.append(item)
+            self.event_experiments[item["id"]] = self.policies.record(host, status)
             kinds = {(finding["kind"], finding["location"]) for finding in summary["findings"] if not finding["expected"]}
             if summary["scanTruncated"]:
                 kinds.add(("inspection truncated", "coverage"))
@@ -130,11 +135,18 @@ class Journal:
             self._track(item, kinds)
             return item["id"]
 
+    def _discard_outcomes(self, events):
+        self.policies.lose_outcomes([
+            ref for event in events if event["status"] == "pending"
+            for ref in self.event_experiments.get(event["id"], ())
+        ])
+
     def update(self, identifier, status):
         with self.lock:
             for item in reversed(self.events):
                 if item["id"] == identifier:
                     new_gap = "not inspected" in status and "not inspected" not in item["status"]
+                    self.policies.update(self.event_experiments.get(identifier, []), item["status"], status)
                     item["status"] = status
                     if new_gap:
                         self._track(item, {("inspection failed", "coverage")})
@@ -152,7 +164,8 @@ class Journal:
     def snapshot(self):
         with self.lock:
             issues = self.issues.snapshot()
-            return {"label": self.label, "events": list(self.events), "blocked": sorted(self.blocked), "observed": self.total,
+            policy = self.policies.snapshot()
+            return {"label": self.label, "events": list(self.events), "blocked": sorted(self.policies.rules), **policy, "attribution": {"kind": "operator-supplied", "source": self.label, "impactScope": "shared-proxy-unknown"}, "observed": self.total,
                     "issues": issues,
                     "tracking": {"sessionStartedAt": self.started_at, "lastObservedAt": self.last_observed_at,
                                  "observedThisSession": self.total, "directTraffic": "unknown",
@@ -160,7 +173,10 @@ class Journal:
                                  "persistent": self.issues.persistent, "persistenceError": self.issues.error},
                     "coverage": "Only requests routed through this proxy are visible. Direct traffic is unobserved. TLS inspection requires trusting this session's CA in the selected client. Payload detection is heuristic, not proof of safety. Source labels are operator-supplied; categories are inferred. Reviewed findings are not verified fixes; recurrence reopens them."}
 
-    def change(self, action, host="", finding_id=""):
+    def change(self, action, host="", finding_id="", duration_seconds=None, experiment_id=""):
+        if action in ACTIONS:
+            with self.lock:
+                return self.policies.change(action, host, duration_seconds, experiment_id, self.events)
         if action not in {"block", "unblock", "clear", "review-finding", "reopen-finding", "clear-findings"}:
             raise ValueError("Unknown action")
         if action in {"block", "unblock"} and (not isinstance(host, str) or len(host) > 253 or not re.fullmatch(r"[A-Za-z0-9.-]+", host)):
@@ -168,13 +184,11 @@ class Journal:
         if action in {"review-finding", "reopen-finding"} and (not isinstance(finding_id, str) or not re.fullmatch(r"[a-f0-9]{64}", finding_id)):
             raise ValueError("Use a finding identifier")
         with self.lock:
-            if action == "block":
-                self.blocked.add(host.lower().rstrip("."))
-            elif action == "unblock":
-                self.blocked.discard(host.lower().rstrip("."))
-            elif action == "clear":
+            if action == "clear":
+                self._discard_outcomes(self.events)
                 self.events.clear()
                 self.event_issues.clear()
+                self.event_experiments.clear()
             elif action == "clear-findings":
                 self.issues.clear()
             else:
@@ -182,8 +196,10 @@ class Journal:
 
     def is_blocked(self, host):
         with self.lock:
-            return host.lower().rstrip(".") in self.blocked
+            self.policies.expire()
+            return host.lower().rstrip(".") in self.policies.rules
 
     def close(self):
         with self.lock:
             self.issues.close()
+            self.policies.close()

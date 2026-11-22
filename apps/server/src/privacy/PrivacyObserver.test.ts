@@ -16,6 +16,14 @@ it.effect("keeps the observer optional and validates rules without a connection"
       (yield* observer.change({ action: "block", host: "https://example.com" }).pipe(Effect.flip))
         .reason,
     ).toBe("invalid_rule");
+    for (const input of [
+      { action: "save-policy" as const, host: "a..test" },
+      { action: "start-experiment" as const, host: "a.test" },
+      { action: "start-experiment" as const, host: "a.test", durationSeconds: 3601 },
+      { action: "finish-experiment" as const },
+    ]) {
+      expect((yield* observer.change(input).pipe(Effect.flip)).reason).toBe("invalid_rule");
+    }
     expect((yield* observer.change({ action: "clear" }).pipe(Effect.flip)).reason).toBe(
       "unavailable",
     );

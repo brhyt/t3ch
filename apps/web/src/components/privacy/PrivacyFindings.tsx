@@ -12,11 +12,10 @@ export function PrivacyFindings({
   pending: boolean;
   apply: (rule: PrivacyRule) => Promise<void>;
 }) {
-  const tracking = journal.tracking;
   return (
     <section className="space-y-3 rounded-lg border p-4">
       <h3 className="font-medium">
-        <span>Coverage and recurring findings</span>
+        <span>Recurring findings</span>
       </h3>
       <p className="text-sm text-muted-foreground">
         <span>
@@ -24,38 +23,6 @@ export function PrivacyFindings({
           coverage. Findings are masked signals for investigation, not proof of a leak.
         </span>
       </p>
-      {tracking ? (
-        <div className="space-y-1 text-sm">
-          <p>
-            {tracking.observedThisSession} <span>requests observed this observer session</span>
-          </p>
-          <p>
-            <span>Last observation</span>:{" "}
-            {tracking.lastObservedAt === null ? (
-              <span>None this session</span>
-            ) : (
-              new Date(tracking.lastObservedAt * 1000).toLocaleString()
-            )}
-          </p>
-          <p>
-            {tracking.persistent && !tracking.persistenceError ? (
-              <span>Masked findings persist across observer restarts.</span>
-            ) : (
-              <span>
-                Persistent findings are unavailable. This session alone cannot track recurrence
-                across restarts.
-              </span>
-            )}
-          </p>
-          <p>
-            {tracking.retentionDays} <span>days maximum findings retention</span>
-          </p>
-        </div>
-      ) : (
-        <p className="text-sm">
-          <span>Update this observer to report session coverage and persistent findings.</span>
-        </p>
-      )}
       {journal.issues?.length ? (
         <div className="space-y-2">
           {journal.issues.map((issue) => (
@@ -75,6 +42,31 @@ export function PrivacyFindings({
                 )}{" "}
                 · {new Date(issue.lastSeen * 1000).toLocaleString()}
               </p>
+              <details>
+                <summary className="cursor-pointer">
+                  <span>Finding detail</span>
+                </summary>
+                <p className="mt-2">
+                  <span>Severity and confidence: unknown</span>
+                </p>
+                <p>
+                  <span>First seen</span>: {new Date(issue.firstSeen * 1000).toLocaleString()}
+                </p>
+                <p>
+                  <span>Last reviewed</span>:{" "}
+                  {issue.reviewedAt ? (
+                    new Date(issue.reviewedAt * 1000).toLocaleString()
+                  ) : (
+                    <span>Not reviewed</span>
+                  )}
+                </p>
+                <p>
+                  <span>
+                    Counts cover retained finding history, not all traffic. Reviewed does not mean
+                    verified fixed.
+                  </span>
+                </p>
+              </details>
               <Button
                 size="sm"
                 variant="outline"
@@ -93,7 +85,11 @@ export function PrivacyFindings({
         </div>
       ) : (
         <p className="text-sm">
-          <span>No retained findings. This does not establish that traffic is safe.</span>
+          {journal.issues === undefined ? (
+            <span>Finding history is unavailable from this observer.</span>
+          ) : (
+            <span>No retained findings. This does not establish that traffic is safe.</span>
+          )}
         </p>
       )}
       <p className="text-sm text-muted-foreground">

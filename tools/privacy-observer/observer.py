@@ -116,7 +116,7 @@ def dashboard(journal, token, port):
                 data = json.loads(self.rfile.read(length))
                 if not isinstance(data, dict):
                     raise ValueError()
-                journal.change(data["action"], data.get("host", ""), data.get("findingId", ""))
+                journal.change(data["action"], data.get("host", ""), data.get("findingId", ""), data.get("durationSeconds"), data.get("experimentId", ""))
                 self.send(200, b'{"ok":true}')
             except (ValueError, TypeError, KeyError):
                 self.send(400, b'{"error":"Invalid rule"}')

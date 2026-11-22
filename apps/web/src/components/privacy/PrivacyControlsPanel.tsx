@@ -59,13 +59,18 @@ export function PrivacyControlsPanel({ environmentId }: { environmentId: Environ
     }).finally(() => setPending(false));
     if (result._tag === "Success") query.refresh();
   }
-  if (!canRead) return null;
+  if (!canRead)
+    return (
+      <p role="status">
+        <span>Diagnostics permission is required to view controls.</span>
+      </p>
+    );
   const browserTracing = resolveRelayTracingConfig() ? "on" : "off";
   return (
     <section className="mx-auto mb-6 max-w-6xl space-y-4 rounded-lg border p-4">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-lg font-semibold">
-          <span>Privacy controls and coverage</span>
+          <span>Controls</span>
         </h2>
         <Button variant="outline" size="sm" onClick={query.refresh} disabled={query.isPending}>
           <span>Refresh settings</span>
@@ -87,6 +92,9 @@ export function PrivacyControlsPanel({ environmentId }: { environmentId: Environ
         <>
           <div className="grid gap-3 md:grid-cols-2">
             <div className="space-y-2 rounded border p-3 text-sm">
+              <h3 className="font-medium">
+                <span>Telemetry startup configuration</span>
+              </h3>
               <p>
                 <span>Server analytics startup setting</span>:{" "}
                 <State value={data.serverTelemetry} />
@@ -101,7 +109,12 @@ export function PrivacyControlsPanel({ environmentId }: { environmentId: Environ
                   startup settings, update the host environment and restart the server.
                 </span>
               </p>
-              <code className="block break-all text-xs">T3CODE_TELEMETRY_ENABLED=false</code>
+              <details>
+                <summary>
+                  <span>Advanced startup setting</span>
+                </summary>
+                <code className="block break-all text-xs">T3CODE_TELEMETRY_ENABLED=false</code>
+              </details>
             </div>
             <div className="space-y-2 rounded border p-3 text-sm">
               <p>

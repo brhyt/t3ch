@@ -1,5 +1,7 @@
 import json
 import unittest
+import tempfile
+from pathlib import Path
 import urllib.error
 import urllib.request
 from mitmproxy.test import tflow
@@ -85,7 +87,9 @@ class ObserverTests(unittest.TestCase):
         self.assertEqual(journal.snapshot()["events"][-1]["status"], "blocked")
 
     def test_dashboard_requires_token_for_data_and_mutations(self):
-        journal = Journal("test")
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        journal = Journal("test", findings_path=Path(directory.name) / "db")
         self.addCleanup(journal.close)
         server = dashboard(journal, "fixture-token", 0)
         base = f"http://127.0.0.1:{server.server_port}"
@@ -105,6 +109,15 @@ class ObserverTests(unittest.TestCase):
                 self.assertEqual(response.headers["Cache-Control"], "no-store")
             with self.assertRaises(urllib.error.HTTPError):
                 request("/api/rules", [], "fixture-token")
+            request("/api/rules", {"action": "save-policy", "host": "saved.test"}, "fixture-token").close()
+            request("/api/rules", {"action": "start-experiment", "host": "trial.test", "durationSeconds": 60}, "fixture-token").close()
+            self.assertTrue(journal.is_blocked("trial.test"))
+            experiment = journal.snapshot()["experiments"][0]
+            request("/api/rules", {"action": "stop-experiment", "experimentId": experiment["id"]}, "fixture-token").close()
+            self.assertFalse(journal.is_blocked("trial.test"))
+            self.assertTrue(journal.is_blocked("saved.test"))
+            with self.assertRaises(urllib.error.HTTPError):
+                request("/api/rules", {"action": "start-experiment", "host": "invalid.test", "durationSeconds": 9999}, "fixture-token")
         finally:
             server.shutdown()
             server.server_close()

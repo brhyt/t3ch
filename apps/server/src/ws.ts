@@ -1160,6 +1160,19 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
   },
 );
 
+// Keep the observer schemas outside the large handler map to bound RPC type instantiation.
+const MainWsRpcGroup = ServerWsRpcGroup.omit(WS_METHODS.privacySnapshot, WS_METHODS.privacyChange);
+const layerPrivacyObserverRpc = Layer.merge(
+  ServerWsRpcGroup.toLayerHandler(
+    WS_METHODS.privacySnapshot,
+    Effect.map(PrivacyObserver.PrivacyObserver, (observer) => () => observer.snapshot()),
+  ),
+  ServerWsRpcGroup.toLayerHandler(
+    WS_METHODS.privacyChange,
+    Effect.map(PrivacyObserver.PrivacyObserver, (observer) => (input) => observer.change(input)),
+  ),
+).pipe(Layer.provide(PrivacyObserver.layer));
+
 const layerWsRpc = (
   currentSession: EnvironmentAuth.AuthenticatedSession,
   clientOrigin: OrchestrationClientOrigin,
@@ -1169,7 +1182,7 @@ const layerWsRpc = (
   browserDesign: BrowserDesign.BrowserDesign["Service"],
   privacyControls: PrivacyControls.PrivacyControls["Service"],
 ) =>
-  ServerWsRpcGroup.toLayer(
+  MainWsRpcGroup.toLayer(
     Effect.gen(function* () {
       const currentSessionId = currentSession.sessionId;
       const sql = yield* SqlClient.SqlClient;
@@ -1209,9 +1222,6 @@ const layerWsRpc = (
       const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       const deviceService = yield* DeviceService.DeviceService;
-      const privacyObserver = yield* PrivacyObserver.PrivacyObserver.pipe(
-        Effect.provide(PrivacyObserver.layer),
-      );
       const deviceHostContext =
         yield* Effect.context<Effect.Services<ReturnType<typeof remoteSshDeviceHosts>>>();
       const orchestrationEngine = yield* Orchestrator.OrchestratorV2;
@@ -1796,7 +1806,7 @@ const layerWsRpc = (
         return result;
       });
 
-      const handlers = ServerWsRpcGroup.of({
+      const handlers = MainWsRpcGroup.of({
         [ORCHESTRATION_V2_WS_METHODS.startMultitask]: (input) => delegatedTasks.launch(input),
         [WS_METHODS.serverGetProviderSkillActions]: (input) =>
           providerRegistry.getSkillActions(input),
@@ -2080,8 +2090,6 @@ const layerWsRpc = (
           privacyControls.changeActivity(input.enabled),
         [WS_METHODS.privacyControls]: () => privacyControls.snapshot(),
         [WS_METHODS.privacyProviderChange]: (input) => privacyControls.changeProvider(input),
-        [WS_METHODS.privacySnapshot]: () => privacyObserver.snapshot(),
-        [WS_METHODS.privacyChange]: (input) => privacyObserver.change(input),
         [WS_METHODS.serverGetConfig]: (_input) => loadServerConfig({ usageLimitsCommand: false }),
         [WS_METHODS.serverSearchAcpRegistry]: (input) =>
           acpRegistryCatalog
@@ -3118,7 +3126,7 @@ const layerWsRpc = (
       });
       return handlers;
     }),
-  );
+  ).pipe(Layer.merge(layerPrivacyObserverRpc));
 
 // RpcServer's default sends a socket-level Defect frame instead, and the client
 // ends every pending request on the socket with it.

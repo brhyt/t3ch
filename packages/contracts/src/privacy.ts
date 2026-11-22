@@ -4,17 +4,77 @@ import { ProviderInstanceId } from "./providerInstance.ts";
 export const PrivacyRule = Schema.Struct({
   action: Schema.Literals([
     "block",
+    "save-policy",
+    "remove-policy",
+    "start-experiment",
+    "stop-experiment",
+    "finish-experiment",
     "unblock",
     "clear",
     "review-finding",
     "reopen-finding",
     "clear-findings",
   ]),
+  durationSeconds: Schema.optional(
+    Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 3600 })),
+  ),
+  experimentId: Schema.optional(Schema.String.check(Schema.isPattern(/^[a-f0-9]{32}$/))),
   findingId: Schema.optional(Schema.String.check(Schema.isMaxLength(64))),
   host: Schema.optional(Schema.String.check(Schema.isMaxLength(253))),
 });
 export type PrivacyRule = typeof PrivacyRule.Type;
+const PrivacyCounters = Schema.Struct({
+  observed: Schema.Number,
+  blocked: Schema.Number,
+  responses: Schema.Number,
+  errors: Schema.Number,
+});
 export const PrivacyJournal = Schema.Struct({
+  policyStorage: Schema.optional(
+    Schema.Struct({
+      status: Schema.Literals(["ready", "ephemeral", "unavailable"]),
+      persistenceError: Schema.Boolean,
+    }),
+  ),
+  attribution: Schema.optional(
+    Schema.Struct({
+      kind: Schema.Literal("operator-supplied"),
+      source: Schema.String,
+      impactScope: Schema.Literal("shared-proxy-unknown"),
+    }),
+  ),
+  rules: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        id: Schema.String,
+        host: Schema.String,
+        kind: Schema.Literals(["session", "saved", "temporary"]),
+        createdAt: Schema.Number,
+        expiresAt: Schema.NullOr(Schema.Number),
+      }),
+    ),
+  ),
+  experiments: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        id: Schema.String,
+        host: Schema.String,
+        startedAt: Schema.Number,
+        expiresAt: Schema.Number,
+        recoveryAt: Schema.NullOr(Schema.Number),
+        finishedAt: Schema.NullOr(Schema.Number),
+        phase: Schema.Literals(["blocked", "recovery", "finished"]),
+        baselineStartedAt: Schema.NullOr(Schema.Number),
+        baselineEndedAt: Schema.Number,
+        evidenceIncomplete: Schema.Boolean,
+        baseline: PrivacyCounters,
+        blocked: PrivacyCounters,
+        recovery: PrivacyCounters,
+        outcome: Schema.Literal("unknown"),
+        evidence: Schema.Literal("bounded-proxy-observations"),
+      }),
+    ),
+  ),
   label: Schema.String,
   coverage: Schema.String,
   observed: Schema.Number,
