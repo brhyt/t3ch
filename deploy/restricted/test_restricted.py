@@ -7,6 +7,8 @@ import tempfile
 import unittest
 import uuid
 
+from run import docker_command
+
 ROOT = Path(__file__).resolve().parent
 PROBE = r'''
 import json,os,pathlib,socket,subprocess
@@ -72,7 +74,7 @@ class RestrictedTests(unittest.TestCase):
             allowlist = root / 'allowlist.txt'
             allowlist.write_text('example.com\nlocalhost\n127.0.0.1\n169.254.169.254\n')
             env = {**os.environ, 'T3_RESTRICTED_WORKSPACE': str(workspace), 'T3_RESTRICTED_ALLOWLIST': str(allowlist)}
-            base = ['docker', 'compose', '-p', project, '-f', str(ROOT / 'compose.yaml')]
+            base = [*docker_command(os.environ.get('T3_RESTRICTED_DOCKER_CONTEXT')), 'compose', '-p', project, '-f', str(ROOT / 'compose.yaml')]
             def compose(*args, check=True):
                 result = subprocess.run([*base, *args], env=env, capture_output=True, text=True, timeout=180)
                 if check and result.returncode:

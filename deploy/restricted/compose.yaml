@@ -19,7 +19,7 @@ services:
           create_host_path: false
     networks:
       restricted:
-        ipv4_address: 172.30.247.2
+        ipv4_address: ${T3_RESTRICTED_PROXY_IP:-172.30.247.2}
       internet: {}
     healthcheck:
       test:
@@ -41,6 +41,8 @@ services:
     mem_limit: 2g
     tmpfs: ["/tmp:mode=1777,size=256m"]
     environment:
+      CODEX_HOME: /state/codex
+      T3_RESTRICTED_PROXY_IP: ${T3_RESTRICTED_PROXY_IP:-172.30.247.2}
       HOME: /state/home
       PATH: /state/home/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
       T3CODE_HOME: /state/t3
@@ -48,28 +50,29 @@ services:
       T3CODE_OTEL_SDK_DISABLED: "true"
       T3PO_MEMORY_EXCHANGE_ENABLED: "false"
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
-      HTTP_PROXY: http://172.30.247.2:3128
-      HTTPS_PROXY: http://172.30.247.2:3128
-      http_proxy: http://172.30.247.2:3128
-      https_proxy: http://172.30.247.2:3128
+      HTTP_PROXY: http://${T3_RESTRICTED_PROXY_IP:-172.30.247.2}:3128
+      HTTPS_PROXY: http://${T3_RESTRICTED_PROXY_IP:-172.30.247.2}:3128
+      http_proxy: http://${T3_RESTRICTED_PROXY_IP:-172.30.247.2}:3128
+      https_proxy: http://${T3_RESTRICTED_PROXY_IP:-172.30.247.2}:3128
       NODE_USE_ENV_PROXY: "1"
       NO_PROXY: localhost,127.0.0.1,::1
     volumes:
       - state:/state
       - type: bind
         source: ${T3_RESTRICTED_WORKSPACE:?Set T3_RESTRICTED_WORKSPACE to a disposable project directory}
-        target: /workspace
+        target: ${T3_RESTRICTED_TARGET:-/workspace}
         bind:
           create_host_path: false
-    working_dir: /workspace
+    working_dir: ${T3_RESTRICTED_TARGET:-/workspace}
     networks:
       restricted:
-        ipv4_address: 172.30.247.3
+        ipv4_address: ${T3_RESTRICTED_RUNNER_IP:-172.30.247.3}
 networks:
   restricted:
     internal: true
     ipam:
-      config: [{ subnet: 172.30.247.0/24 }]
+      config: [{ subnet: "${T3_RESTRICTED_SUBNET:-172.30.247.0/24}" }]
   internet: {}
 volumes:
-  state: {}
+  state:
+    name: ${T3_RESTRICTED_STATE_VOLUME:-${COMPOSE_PROJECT_NAME}_state}
