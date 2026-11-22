@@ -51,7 +51,7 @@ def validate_frame(frame, workspace):
             raise ValueError('This Codex instance is bound to a different workspace.')
 
 
-def main():
+def workload():
     if len(sys.argv) < 4 or sys.argv[1] != '--config':
         raise ValueError('Usage: codex.py --config /absolute/operator-config.json CODEX_ARGS...')
     config_path = Path(sys.argv[2]).resolve(strict=True)
@@ -85,20 +85,45 @@ def main():
                T3_RESTRICTED_RUNNER_IP=subnet + '.3')
     base = [*docker, 'compose', '-p', project, '-f', str(Path(__file__).with_name('compose.yaml'))]
     child = None
+    creating = False
     interrupted = 0
     def stop(signum, _frame):
         nonlocal interrupted
         interrupted = signum
-        if child is not None and child.poll() is None:
+        if not creating and child is not None and child.poll() is None:
             child.send_signal(signal.SIGTERM)
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(sig, stop)
+    output_threads = []
+    def spawn(command, stdin, stdout):
+        # A dead server may close its log pipes too. Keep draining Docker output
+        # so EPIPE cannot abort a still outstanding create request.
+        process = subprocess.Popen(command, env=env, stdin=stdin,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        def forward(source, target):
+            with source:
+                while chunk := source.read1(65536):
+                    try:
+                        view = memoryview(chunk)
+                        while view:
+                            view = view[os.write(target, view):]
+                    except OSError:
+                        pass
+        for source, target in ((process.stdout, stdout), (process.stderr, 2)):
+            thread = threading.Thread(target=forward, args=(source, target), daemon=True)
+            thread.start()
+            output_threads.append(thread)
+        return process
     def operation(*args):
-        nonlocal child
+        nonlocal child, creating
         if interrupted:
             raise SystemExit(128 + interrupted)
-        child = subprocess.Popen([*base, *args], env=env, stdin=subprocess.DEVNULL, stdout=sys.stderr, pass_fds=(write_fd,))
-        code = child.wait()
+        creating = True
+        try:
+            child = spawn([*base, *args], subprocess.DEVNULL, 2)
+            code = child.wait()
+        finally:
+            creating = False
         if interrupted:
             raise SystemExit(128 + interrupted)
         if code:
@@ -109,27 +134,39 @@ def main():
         snapshot.write_text(identity[-1])
         snapshot.chmod(0o644)
         env['T3_RESTRICTED_ALLOWLIST'] = str(snapshot)
-        read_fd, write_fd = os.pipe()
-        guardian = subprocess.Popen(
-            [sys.executable, '-c',
-             'import os,subprocess,sys\nos.read(int(sys.argv[1]),1)\n'
-             'result = subprocess.run(sys.argv[2:],stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=30)\n'
-             'try: os.write(2,result.stdout)\n'
-             'except OSError: pass\n'
-             'sys.exit(result.returncode)',
-             str(read_fd), *base, 'down', '--remove-orphans', '--timeout', '0'],
-            env=env, pass_fds=(read_fd,), start_new_session=True,
-            stdin=subprocess.DEVNULL, stdout=sys.stderr)
-        os.close(read_fd)
         try:
             operation('up', '-d', '--wait', '--wait-timeout', '45', '--no-build', '--pull', 'never', 'proxy')
             if interrupted:
                 raise SystemExit(128 + interrupted)
             args = sys.argv[3:]
             app_server = 'app-server' in args
-            child = subprocess.Popen([*base, 'run', '--rm', '--no-deps', '--pull', 'never', '-T', 'runner', '/usr/local/bin/node', '/usr/local/lib/node_modules/@openai/codex/bin/codex.js', *args],
-                                     env=env, stdin=subprocess.PIPE if app_server else None)
+            # Compose owns its create request in this external service. Cancellation
+            # may stop its attach client only after the daemon acknowledges start.
+            # Killing the client sooner could leave an outstanding daemon create.
+            creating = True
+            runner = project + '-runner'
+            child = spawn([*base, 'run', '--name', runner, '--rm', '--no-deps', '--pull', 'never', '-T', 'runner', '/usr/local/bin/node', '/usr/local/lib/node_modules/@openai/codex/bin/codex.js', *args],
+                                     subprocess.PIPE if app_server else None, 1)
             errors = []
+            def await_creation():
+                nonlocal creating
+                while child.poll() is None:
+                    try:
+                        result = subprocess.run([*docker, 'inspect', '--format', '{{.State.Status}}', runner],
+                                                env=env, capture_output=True, text=True, timeout=10)
+                    except subprocess.TimeoutExpired:
+                        continue
+                    if result.returncode == 0 and result.stdout.strip() in ('running', 'exited', 'dead'):
+                        try:
+                            print('Restricted runner started: ' + runner, file=sys.stderr, flush=True)
+                        except OSError:
+                            pass
+                        creating = False
+                        if (interrupted or errors) and child.poll() is None:
+                            child.terminate()
+                        return
+                    threading.Event().wait(0.1)
+            threading.Thread(target=await_creation, daemon=True).start()
             def relay():
                 try:
                     def lines():
@@ -151,7 +188,8 @@ def main():
                 except (ValueError, TypeError, AttributeError) as error:
                     errors.append(str(error))
                     print(str(error), file=sys.stderr)
-                    child.terminate()
+                    if not creating:
+                        child.terminate()
                 except BrokenPipeError:
                     pass
                 finally:
@@ -159,19 +197,30 @@ def main():
             if app_server:
                 threading.Thread(target=relay, daemon=True).start()
             code = child.wait()
+            for thread in output_threads:
+                thread.join()
             return 128 + interrupted if interrupted else (1 if errors else code)
         finally:
             # The engine owns workload termination, even if Compose's attach client died.
             for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
                 signal.signal(sig, signal.SIG_IGN)
-            os.close(write_fd)
-            if guardian.wait(timeout=35):
+            cleanup = spawn([*base, 'down', '--remove-orphans', '--timeout', '0'], subprocess.DEVNULL, 2)
+            try:
+                cleanup_code = cleanup.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                cleanup.kill()
+                cleanup.wait()
+                raise
+            for thread in output_threads:
+                thread.join(timeout=1)
+            if cleanup_code:
                 raise RuntimeError('Cleanup failed; inspect the Docker project ' + project)
 
 
 if __name__ == '__main__':
     try:
-        raise SystemExit(main())
+        from supervisor import run
+        raise SystemExit(run(workload))
     except (ValueError, OSError, RuntimeError, subprocess.SubprocessError) as error:
         print(f'Restricted Codex: {error}', file=sys.stderr)
         raise SystemExit(1)

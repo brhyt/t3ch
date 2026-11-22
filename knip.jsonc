@@ -35,6 +35,8 @@
         "scripts/update-test-shard-weights.ts",
         "scripts/verify-background-live.ts",
         "src/provider/testFixtures/*.mjs",
+        // Invoked by deploy/restricted/adapter_proof.py.
+        "src/orchestration-v2/Adapters/CodexAdapterV2.restricted-proof.ts",
       ],
       // Keep the transitive Effect runtime pinned for standalone npm installs.
       // The Vite+ web build prerequisite.

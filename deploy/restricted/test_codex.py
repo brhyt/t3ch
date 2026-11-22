@@ -68,7 +68,7 @@ server.serve_forever()
             def assert_cleaned(log):
                 for project in set(re.findall(r'Network (t3-codex-[a-f0-9]{16})_', log)):
                     for resource in ('container', 'network'):
-                        remaining = subprocess.check_output(['docker', '--context', 'default', resource, 'ls', '-q', '--filter', 'label=com.docker.compose.project=' + project], text=True)
+                        remaining = subprocess.check_output(['docker', '--context', 'default', resource, 'ls', '-aq' if resource == 'container' else '-q', '--filter', 'label=com.docker.compose.project=' + project], text=True)
                         self.assertEqual(remaining.strip(), '', (project, resource))
             buffers = {}
             def read_frame(process):

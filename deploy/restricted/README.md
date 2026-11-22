@@ -99,10 +99,32 @@ Create an executable launcher outside the workspace:
 exec /absolute/checkout/deploy/restricted/codex.py --config /absolute/operator-config.json "$@"
 ```
 
-Set the existing Codex provider instance `binaryPath` to that launcher. Leave custom homePath/launchArgs unset initially. All launches through this binaryPath—including version, account/auth, models, skills and app-server—use the container. Probes may start concurrently, so every invocation has its own Docker project and randomly selected private /24 subnet. A collision fails closed; there is no retry on another engine or host CLI. Cold launches include proxy health checks: increase the provider probe timeout if necessary. Operator-provided launch flags are passed to the isolated CLI, not interpreted as engine commands.
+Set the existing Codex provider instance `binaryPath` to that launcher. Leave custom homePath/launchArgs unset initially. All launches through this binaryPath—including version, account/auth, models, skills and app-server—use the container. Probes may start concurrently, so every invocation has its own Docker project and randomly selected private /24 subnet. A collision fails closed; there is no retry on another engine or host CLI. Cold launches include proxy health checks. This fork currently has a fixed 20-second Codex probe deadline; there is no probe-timeout setting. Operator-provided launch flags are passed to the isolated CLI, not interpreted as engine commands.
 
 The workspace is mounted at its matching absolute path; protocol prompt content is never rewritten. Canonical absolute workspace paths are required. Existing escaping symlinks, hardlinked files and nested mounts are rejected. Do not modify host mount topology or replace the workspace during a session. Workspace `cwd` requests must stay within the bound workspace; an incompatible request ends the process with an error on stderr. Resume by filesystem path is unsupported. One instance cannot serve other projects or external worktrees; configure separate instances/launchers. Host-configured MCP commands, files outside the workspace, host skills/plugins, host executables and local host services are unavailable inside the container. Provider-managed worktrees outside this mount are unsupported.
 
 State volume name is `t3-codex-<identity digest>` (visible in Compose stderr). Identity includes workspace path/device/inode, Docker context/endpoint, immutable image, operator state name and allowlist contents. Reconnect with the same identity reuses state; changing any of those starts separate state. Authentication can be provisioned manually by running the launcher with Codex's supported login options; it stays in the named volume. Never copy host auth files or tokens. Login/browser/device workflows and real authenticated turns remain unverified. Restoring the former binaryPath and restarting that provider reverts the option. Once all its processes stop, explicitly remove the named volume to erase isolated state; normal cleanup preserves it.
 
-Build/up/cleanup diagnostics go to stderr; only Codex stdout reaches T3. A separate cleanup guardian removes the invocation's containers/networks on EOF, cancellation or wrapper death, including T3's force-kill path. Host/daemon failure can still leave resources: inspect the `t3-codex-*` project named in stderr and remove that exact project. No daemon-wide cleanup is appropriate. State volumes intentionally survive. Run `TMPDIR=/your/scratch python3 -m unittest test_codex` from this directory after building the pinned image for explicit Docker integration tests; this is not part of the default provider launch.
+Build/up/cleanup diagnostics go to stderr; only Codex stdout reaches T3. Linux with pidfd support and a running systemd user manager is required. Before creating Docker resources, the launcher establishes and acknowledges a transient `t3-codex-owner-*.service` outside the provider scope. Unavailable supervision refuses launch; there is no host CLI fallback. No persistent units or desktop configuration are installed. The service receives only PATH, HOME and XDG_RUNTIME_DIR, and owns the invocation's snapshot, Docker startup, and cleanup. Operator arguments travel over a private socket rather than stored unit properties.
+
+The owner watches the wrapper with a pidfd. Cancellation during creation waits for the owned Compose operation to finish startup; only after Docker acknowledges runner startup may cancellation terminate the attach client. Thus cleanup cannot race a create request abandoned by provider-scope SIGKILL. Normal EOF, signals, wrapper death and provider-scope death remove this invocation's containers/networks and preserve its state volume. Cleanup has a 30-second command deadline. A hung Docker daemon can prevent outstanding startup from settling; host/kernel failure, reboot, user-manager shutdown, or killing the cleanup service itself are not covered. Inspect the exact `t3-codex-*` project named in stderr after daemon/host failure; never use daemon-wide prune. A responsive daemon and surviving user manager are prerequisites.
+
+Run `python deploy/restricted/test_codex.py` for the pinned-image protocol/lifecycle checks and `python deploy/restricted/test_scope.py` for a controlled late-create scope-kill regression and unavailable-supervisor refusal. Neither builds an image.
+
+### Actual adapter proof
+
+From the checkout root, with dependencies installed and the pinned image present:
+
+```sh
+python deploy/restricted/adapter_proof.py
+```
+
+This explicitly invoked test runs the real provider probe and adapter process factory with an empty allowlist, disposable T3 state and workspace, and a mock Responses server inside the container. It checks a synthetic completed turn, native thread resume, turn interruption, workspace write/read, workspace mismatch rejection, and container/network cleanup. It uses disposable systemd user scopes; Linux with a running user manager is required. The synthetic response is not paid-provider generation. File writes use the real session client's command/exec API, not a model-selected tool call.
+
+The whole-scope cleanup regression is separately reproducible:
+
+```sh
+RESTRICTED_PROOF_KILL_SCOPE=1 python deploy/restricted/adapter_proof.py
+```
+
+It kills only the disposable adapter scope created by the test. This proves loss of the entire provider cgroup by SIGKILL, including its wrapper; it does not induce an actual OOM or kill the T3 server. It covers that equivalent provider-process loss only while the external owner and Docker survive. Host Git, checkpoints and MCP remain outside this provider boundary.
