@@ -23,7 +23,10 @@ it.layer(NodeServices.layer)("ClaudeHome", (it) => {
         expect(yield* resolveClaudeHomePath({ homePath: "" })).toBe(resolved);
         expect(yield* resolveClaudeHomePath({ homePath: "~/.claude" })).toBe(resolved);
         expect(yield* resolveClaudeHomePath({ homePath: resolved })).toBe(resolved);
-        expect(yield* makeClaudeEnvironment({ homePath: "" })).toBe(process.env);
+        expect(
+          (yield* makeClaudeEnvironment({ homePath: "" }, {}))
+            .CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC,
+        ).toBe("1");
 
         const key = `claude:home:${resolved}`;
         expect(yield* makeClaudeContinuationGroupKey({ homePath: "" })).toBe(key);

@@ -85,6 +85,12 @@ export function resolveRelayClientTracingConfig(
   env: Readonly<Record<string, string | undefined>> = process.env,
   fallback = buildTimeRelayClientTracing,
 ) {
+  if (
+    env.T3CODE_TELEMETRY_ENABLED !== "true" ||
+    env.T3CODE_OTEL_SDK_DISABLED === "true" ||
+    (env.T3CODE_OTEL_SDK_DISABLED !== "false" && env.OTEL_SDK_DISABLED === "true")
+  )
+    return null;
   const tracesUrl = env.T3CODE_RELAY_CLIENT_OTLP_TRACES_URL?.trim() || fallback.tracesUrl;
   const tracesDataset =
     env.T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET?.trim() || fallback.tracesDataset;

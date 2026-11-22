@@ -2190,6 +2190,17 @@ function OpenCommandPaletteDialog(props: {
 
   actionItems.push({
     kind: "action",
+    value: "action:privacy",
+    searchTerms: ["privacy", "data", "egress", "sensitive", "network", "blocks"],
+    title: "Privacy dashboard",
+    icon: <ChartNoAxesColumnIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({ to: "/privacy" });
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
     value: "action:settings",
     searchTerms: ["settings", "preferences", "configuration", "keybindings"],
     title: "Open settings",

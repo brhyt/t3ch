@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   CloudPublicConfigMissingError,
   hasCloudPublicConfig,
+  resolveRelayTracingConfig,
   resolveRelayClerkTokenOptions,
 } from "./publicConfig.ts";
 
@@ -42,4 +43,14 @@ describe("hasCloudPublicConfig", () => {
       new CloudPublicConfigMissingError({ key: "T3CODE_CLERK_JWT_TEMPLATE" }),
     );
   });
+});
+
+it("does not export browser traces without explicit build consent", () => {
+  vi.stubEnv("VITE_RELAY_OTLP_TRACES_URL", "https://traces.example.test");
+  vi.stubEnv("VITE_RELAY_OTLP_TRACES_DATASET", "test");
+  vi.stubEnv("VITE_RELAY_OTLP_TRACES_TOKEN", "fixture");
+  vi.stubEnv("VITE_T3CODE_TELEMETRY_ENABLED", "false");
+  expect(resolveRelayTracingConfig()).toBeNull();
+  vi.stubEnv("VITE_T3CODE_TELEMETRY_ENABLED", "true");
+  expect(resolveRelayTracingConfig()).not.toBeNull();
 });

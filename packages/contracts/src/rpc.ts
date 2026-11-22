@@ -1,3 +1,4 @@
+import { PrivacySnapshot, PrivacyRule, PrivacyObserverError } from "./privacy.ts";
 import { BrowserDesignInput, BrowserDesignResult, BrowserDesignError } from "./browserDesign.ts";
 import {
   OrchestrationV2SearchThreadError,
@@ -469,6 +470,8 @@ export const WS_METHODS = {
   deviceAction: "device.action",
 
   serverProbe: "server.probe",
+  privacySnapshot: "privacy.snapshot",
+  privacyChange: "privacy.change",
   serverGetConfig: "server.getConfig",
   serverRefreshProviders: "server.refreshProviders",
   serverGetProviderSkillActions: "server.getProviderSkillActions",
@@ -597,6 +600,16 @@ const WsServerProbeRpc = Rpc.make(WS_METHODS.serverProbe, {
   error: EnvironmentAuthorizationError,
 });
 
+const WsPrivacySnapshotRpc = Rpc.make(WS_METHODS.privacySnapshot, {
+  payload: Schema.Struct({}),
+  success: PrivacySnapshot,
+  error: Schema.Union([PrivacyObserverError, EnvironmentAuthorizationError]),
+});
+const WsPrivacyChangeRpc = Rpc.make(WS_METHODS.privacyChange, {
+  payload: PrivacyRule,
+  success: Schema.Void,
+  error: Schema.Union([PrivacyObserverError, EnvironmentAuthorizationError]),
+});
 const WsServerGetConfigRpc = Rpc.make(WS_METHODS.serverGetConfig, {
   payload: Schema.Struct({}),
   success: ServerConfig,
@@ -1876,6 +1889,8 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
 
 export const WsRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
+  WsPrivacySnapshotRpc,
+  WsPrivacyChangeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
   WsServerProviderSkillActionsRpc,

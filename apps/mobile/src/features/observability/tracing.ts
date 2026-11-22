@@ -15,6 +15,7 @@ export interface TracingResource {
 }
 
 export function resolveTracingConfig(): TracingConfig | null {
+  if (Constants.expoConfig?.extra?.observability?.enabled !== true) return null;
   const config = resolveCloudPublicConfig();
   if (!hasTracingPublicConfig(config)) {
     return null;

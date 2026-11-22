@@ -45,3 +45,11 @@ node_modules/
 
 # pnpm content-addressable store; never belongs in the repo.
 .pnpm-store/
+
+# Local agent permissions can contain literal credentials.
+.claude/settings.local.json
+
+# Local inspection CA and observer state.
+.t3-privacy/
+tools/privacy-observer/.venv/
+**/__pycache__/

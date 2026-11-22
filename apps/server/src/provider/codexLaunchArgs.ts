@@ -11,6 +11,8 @@ const codexLaunchArgv = (launchArgs?: string): ReadonlyArray<string> => tokenize
 
 export const codexAppServerArgs = (launchArgs?: string) => [
   "app-server",
+  "-c",
+  "analytics.enabled=false",
   ...codexLaunchArgv(launchArgs),
 ];
 

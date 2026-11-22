@@ -36,6 +36,11 @@ describe("RPC authorization scopes", () => {
     expect(new Set(Object.keys(RPC_REQUIRED_SCOPES))).toEqual(new Set(WsRpcGroup.requests.keys()));
   });
 
+  it("reserves privacy observations for diagnostics readers and block rules for settings writers", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.privacySnapshot)).toBe(AuthDiagnosticsReadScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.privacyChange)).toBe(AuthSettingsWriteScope);
+  });
+
   it("requires operate access to stop a workflow", () => {
     expect(requiredScopeForRpcMethod(ORCHESTRATION_V2_WS_METHODS.stopWorkflow)).toBe(
       AuthOrchestrationOperateScope,

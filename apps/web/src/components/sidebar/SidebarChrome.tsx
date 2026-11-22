@@ -1,4 +1,4 @@
-import { ArrowLeftIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
+import { ArrowLeftIcon, ChartNoAxesColumnIcon, SettingsIcon, ShieldCheckIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { memo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
@@ -218,6 +218,14 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
           />
         </>
       )}
+      <SidebarUtilityItem
+        icon={<ShieldCheckIcon />}
+        label="Privacy dashboard"
+        onClick={() => {
+          closeMobileSidebar();
+          void navigate({ to: "/privacy" });
+        }}
+      />
       <SidebarUpdatePill />
     </SidebarMenu>
   );

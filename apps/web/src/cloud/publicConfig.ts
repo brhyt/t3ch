@@ -59,6 +59,7 @@ export function resolveCloudPublicConfig(): CloudPublicConfig {
 }
 
 export function resolveRelayTracingConfig() {
+  if (import.meta.env.VITE_T3CODE_TELEMETRY_ENABLED !== "true") return null;
   const { relayTracing } = resolveCloudPublicConfig();
   return relayTracing.tracesUrl && relayTracing.tracesDataset && relayTracing.tracesToken
     ? {

@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>T3 · Data activity</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font:
+          15px/1.5 system-ui,
+          sans-serif;
+        background: #101418;
+        color: #e8edf3;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+      }
+      main {
+        max-width: 1250px;
+        margin: auto;
+        padding: 36px 24px;
+      }
+      h1 {
+        font-size: 30px;
+        letter-spacing: -0.04em;
+        margin: 0;
+      }
+      h2 {
+        font-size: 18px;
+        margin: 0 0 14px;
+      }
+      p {
+        color: #aab6c4;
+      }
+      header,
+      .toolbar,
+      .row {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+      }
+      .eyebrow {
+        color: #80d8bf;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+      }
+      .badge {
+        border: 1px solid #31584f;
+        border-radius: 20px;
+        padding: 6px 12px;
+        color: #94e7ca;
+        font-size: 12px;
+      }
+      .notice {
+        padding: 16px;
+        border: 1px solid #354250;
+        background: #19212b;
+        border-radius: 12px;
+        margin: 24px 0;
+        color: #c4d1df;
+      }
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+      }
+      .card,
+      section {
+        background: #181e25;
+        border: 1px solid #2c3541;
+        border-radius: 12px;
+        padding: 20px;
+      }
+      .card b {
+        display: block;
+        font-size: 28px;
+      }
+      .card span {
+        color: #aab6c4;
+        font-size: 13px;
+      }
+      .columns {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        margin: 20px 0;
+      }
+      button,
+      input,
+      select {
+        font: inherit;
+        color: inherit;
+        border: 1px solid #425065;
+        background: #202a36;
+        border-radius: 7px;
+        padding: 8px 11px;
+      }
+      button {
+        cursor: pointer;
+      }
+      button:hover {
+        border-color: #80d8bf;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: wait;
+      }
+      .danger {
+        color: #ffb4a6;
+      }
+      .toolbar {
+        margin: 20px 0;
+      }
+      input {
+        min-width: 200px;
+        flex: 1;
+      }
+      .table {
+        overflow: auto;
+        border: 1px solid #2c3541;
+        border-radius: 12px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        text-align: left;
+        font-size: 13px;
+      }
+      th {
+        color: #aab6c4;
+        font-weight: 500;
+        background: #181e25;
+      }
+      td,
+      th {
+        padding: 14px;
+        border-bottom: 1px solid #2c3541;
+        vertical-align: top;
+      }
+      td small {
+        display: block;
+        color: #9eacbc;
+        margin-top: 3px;
+      }
+      .finding {
+        color: #ffb4a6;
+      }
+      .muted {
+        color: #9eacbc;
+      }
+      .bar {
+        height: 8px;
+        background: #80d8bf;
+        border-radius: 4px;
+        margin: 5px 0 12px;
+        min-width: 2px;
+      }
+      .domain {
+        overflow-wrap: anywhere;
+      }
+      #error {
+        color: #ffb4a6;
+        white-space: pre-wrap;
+      }
+      #empty {
+        text-align: center;
+        padding: 38px;
+      }
+      a {
+        color: #80d8bf;
+      }
+      .rules {
+        display: grid;
+        gap: 8px;
+      }
+      .rules .row {
+        padding: 8px;
+        background: #202a36;
+        border-radius: 7px;
+      }
+      footer {
+        color: #9eacbc;
+        font-size: 12px;
+        margin-top: 24px;
+      }
+      @media (max-width: 700px) {
+        .columns {
+          grid-template-columns: 1fr;
+        }
+        .cards {
+          gap: 7px;
+        }
+        .card {
+          padding: 12px;
+        }
+        .card b {
+          font-size: 23px;
+        }
+        main {
+          padding: 22px 14px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <div class="eyebrow">T3 / Privacy lab</div>
+          <h1>Where your data goes</h1>
+          <p id="session">Connecting to the local observer…</p>
+        </div>
+        <span class="badge">Observe first · blocks are manual</span>
+      </header>
+      <div class="notice" id="coverage">
+        Only traffic explicitly routed through this proxy is observed. No system-wide monitoring.
+      </div>
+      <div class="cards">
+        <div class="card"><b id="count">0</b><span>Requests observed this session</span></div>
+        <div class="card">
+          <b id="sensitive">0</b><span>Retained events with possible sensitive data</span>
+        </div>
+        <div class="card"><b id="blocked">0</b><span>Domains blocked in this session</span></div>
+      </div>
+      <div class="columns">
+        <section>
+          <h2>Destinations · outbound body bytes</h2>
+          <div id="destinations" class="muted">Waiting for traffic.</div>
+        </section>
+        <section>
+          <h2>Block experiments</h2>
+          <p>
+            Block one exact host, retry the task, then undo the block to compare. Rules affect only
+            this proxy and expire when it stops. An allowed host can still receive sensitive data.
+          </p>
+          <form id="ruleform" class="row">
+            <input
+              id="hostname"
+              aria-label="Exact hostname"
+              placeholder="api.example.com"
+              required
+            /><button>Block host</button>
+          </form>
+          <div id="rules" class="rules"></div>
+        </section>
+      </div>
+      <div class="toolbar">
+        <input
+          id="search"
+          aria-label="Filter destinations"
+          placeholder="Filter by destination…"
+        /><select id="filter" aria-label="Filter events">
+          <option value="all">All observed events</option>
+          <option value="sensitive">Possible sensitive data</option>
+          <option value="blocked">Blocked</option>
+          <option value="errors">Errors / uncertain delivery</option></select
+        ><button id="export">Export masked report</button
+        ><button id="clear">Clear observations</button>
+      </div>
+      <p id="error" role="alert"></p>
+      <div class="table">
+        <table>
+          <thead>
+            <tr>
+              <th>Time / source</th>
+              <th>Destination / purpose</th>
+              <th>What was observed</th>
+              <th>Sensitive-data signals</th>
+              <th>Delivery / action</th>
+            </tr>
+          </thead>
+          <tbody id="events"></tbody>
+        </table>
+        <div id="empty">Route a test session through the proxy to see its requests here.</div>
+      </div>
+      <footer>
+        Raw bodies, URL paths and query values, authentication headers, and matched secret values
+        are never stored in this journal or exported. Detection is heuristic: no findings does not
+        mean no sensitive data. Authentication headers are shown separately as expected credentials.
+        The last 2,000 events are kept in memory; stopping the observer discards them. Blocks are
+        destination rules, not a host firewall.
+      </footer>
+    </main>
+    <script>
+      let token = location.hash.slice(1);
+      history.replaceState(null, "", location.pathname);
+      let state = { events: [], blocked: [], observed: 0 };
+      const $ = (id) => document.getElementById(id),
+        bytes = (n) =>
+          n < 1024
+            ? n + " B"
+            : n < 1048576
+              ? (n / 1024).toFixed(1) + " KB"
+              : (n / 1048576).toFixed(1) + " MB";
+      function el(tag, text, cls) {
+        const n = document.createElement(tag);
+        n.textContent = text;
+        if (cls) n.className = cls;
+        return n;
+      }
+      async function api(path, body) {
+        const r = await fetch(path, {
+          method: body ? "POST" : "GET",
+          headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+          ...(body ? { body: JSON.stringify(body) } : {}),
+        });
+        if (!r.ok)
+          throw new Error(
+            r.status === 401
+              ? "Open the dashboard link printed by the running observer again."
+              : "Request failed (" + r.status + ").",
+          );
+        return r.json();
+      }
+      async function change(action, host) {
+        try {
+          await api("/api/rules", { action, host });
+          await refresh();
+        } catch (e) {
+          $("error").textContent = e.message;
+        }
+      }
+      function blockButton(host) {
+        const blocked = state.blocked.includes(host.toLowerCase().replace(/\.$/, ""));
+        const b = el("button", blocked ? "Unblock" : "Block");
+        b.onclick = () => change(blocked ? "unblock" : "block", host);
+        return b;
+      }
+      function render() {
+        $("count").textContent = state.observed;
+        $("sensitive").textContent = state.events.filter((e) =>
+          e.findings.some((f) => !f.expected),
+        ).length;
+        $("blocked").textContent = state.blocked.length;
+        $("session").textContent = "Session: " + state.label + " · local, in-memory journal";
+        $("coverage").textContent = state.coverage;
+        const groups = new Map();
+        for (const e of state.events) groups.set(e.host, (groups.get(e.host) || 0) + e.bodyBytes);
+        const dest = $("destinations");
+        dest.replaceChildren();
+        const ranked = [...groups].sort((a, b) => b[1] - a[1]).slice(0, 8),
+          max = Math.max(1, ...ranked.map((x) => x[1]));
+        for (const [host, size] of ranked) {
+          const row = el("div", "", "row");
+          row.append(el("span", host, "domain"), el("small", bytes(size)));
+          const bar = el("div", "", "bar");
+          bar.style.width = Math.max(1, (size / max) * 100) + "%";
+          dest.append(row, bar);
+        }
+        if (!ranked.length) dest.textContent = "Waiting for traffic.";
+        $("rules").replaceChildren(
+          ...state.blocked.map((host) => {
+            const row = el("div", "", "row");
+            row.append(el("span", host, "domain"), blockButton(host));
+            return row;
+          }),
+        );
+        const search = $("search").value.toLowerCase(),
+          filter = $("filter").value;
+        const events = state.events
+          .filter(
+            (e) =>
+              e.host.toLowerCase().includes(search) &&
+              (filter === "all" ||
+                (filter === "sensitive" && e.findings.some((f) => !f.expected)) ||
+                (filter === "blocked" && e.status === "blocked") ||
+                (filter === "errors" && /error|uncertain|not inspected/.test(e.status))),
+          )
+          .reverse();
+        $("events").replaceChildren();
+        $("empty").hidden = events.length > 0;
+        for (const e of events) {
+          const tr = document.createElement("tr"),
+            a = el("td", new Date(e.time * 1000).toLocaleTimeString());
+          a.append(el("small", e.source));
+          const b = el("td", e.host, "domain");
+          b.append(el("small", e.category));
+          const c = el("td", e.method + " · " + bytes(e.bodyBytes));
+          c.append(
+            el(
+              "small",
+              e.fields.length
+                ? "Contains: " + e.fields.join(", ")
+                : "Content structure unclassified",
+            ),
+          );
+          if (e.scanTruncated) c.append(el("small", "Only first 1 MiB scanned", "finding"));
+          const d = el("td", "");
+          if (!e.findings.length) d.append(el("span", "No pattern matched", "muted"));
+          for (const f of e.findings)
+            d.append(
+              el(
+                "div",
+                f.kind +
+                  " · " +
+                  f.location +
+                  " ×" +
+                  f.count +
+                  (f.expected ? " (expected auth)" : " · value masked"),
+                f.expected ? "muted" : "finding",
+              ),
+            );
+          const end = el("td", e.status);
+          end.append(document.createElement("br"), blockButton(e.host));
+          tr.append(a, b, c, d, end);
+          $("events").append(tr);
+        }
+      }
+      async function refresh() {
+        try {
+          state = await api("/api/events");
+          $("error").textContent = "";
+          render();
+        } catch (e) {
+          $("error").textContent = e.message;
+        }
+      }
+      $("ruleform").onsubmit = (e) => {
+        e.preventDefault();
+        change("block", $("hostname").value.trim());
+      };
+      $("search").oninput = render;
+      $("filter").onchange = render;
+      $("clear").onclick = () => change("clear");
+      $("export").onclick = () => {
+        const url = URL.createObjectURL(
+          new Blob([JSON.stringify(state, null, 2)], { type: "application/json" }),
+        );
+        const a = el("a", "");
+        a.href = url;
+        a.download = "t3-privacy-masked-report.json";
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      };
+      refresh();
+      setInterval(refresh, 2500);
+    </script>
+  </body>
+</html>

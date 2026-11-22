@@ -1,3 +1,4 @@
+import Constants from "expo-constants";
 import { expect, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
@@ -94,4 +95,21 @@ it.effect("does not let OTLP serialization failures alter application effects", 
       }),
     ),
   );
+});
+
+it("requires explicit mobile build consent even with a collector configured", () => {
+  const extra = Constants.expoConfig?.extra;
+  if (!extra) throw new Error("Missing test Expo config");
+  extra.observability = {
+    tracesUrl: "https://traces.example.test",
+    tracesDataset: "fixture",
+    tracesToken: "fixture",
+  };
+  try {
+    expect(Tracing.resolveTracingConfig()).toBeNull();
+    extra.observability.enabled = true;
+    expect(Tracing.resolveTracingConfig()).not.toBeNull();
+  } finally {
+    delete extra.observability;
+  }
 });

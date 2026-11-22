@@ -3331,6 +3331,9 @@ export function GeneralSettingsPanel() {
         />
       </SettingsSection>
       <SettingsSection title="Diagnostics">
+        <Button render={<Link to="/privacy" />} size="sm" variant="outline">
+          Privacy dashboard
+        </Button>
         <SettingsRow
           {...searchableSetting("diagnostics")}
           description={

@@ -1,3 +1,4 @@
+import * as PrivacyObserver from "./privacy/PrivacyObserver.ts";
 import * as BrowserDesign from "./preview/BrowserDesign.ts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
@@ -1206,6 +1207,9 @@ const layerWsRpc = (
       const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       const deviceService = yield* DeviceService.DeviceService;
+      const privacyObserver = yield* PrivacyObserver.PrivacyObserver.pipe(
+        Effect.provide(PrivacyObserver.layer),
+      );
       const deviceHostContext =
         yield* Effect.context<Effect.Services<ReturnType<typeof remoteSshDeviceHosts>>>();
       const orchestrationEngine = yield* Orchestrator.OrchestratorV2;
@@ -2069,6 +2073,8 @@ const layerWsRpc = (
             Effect.andThen(scheduledTasks.getWebhookDelivery(input)),
           ),
         [WS_METHODS.serverProbe]: (_input) => Effect.succeed({}),
+        [WS_METHODS.privacySnapshot]: () => privacyObserver.snapshot(),
+        [WS_METHODS.privacyChange]: (input) => privacyObserver.change(input),
         [WS_METHODS.serverGetConfig]: (_input) => loadServerConfig({ usageLimitsCommand: false }),
         [WS_METHODS.serverSearchAcpRegistry]: (input) =>
           acpRegistryCatalog

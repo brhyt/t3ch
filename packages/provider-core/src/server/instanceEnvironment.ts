@@ -8,6 +8,20 @@ export const mergeProviderInstanceEnvironment = Effect.fn(function* (
   environment: ProviderInstanceEnvironment | undefined,
   baseEnv: NodeJS.ProcessEnv = process.env,
 ) {
+  const host = yield* HostProcess.Environment;
+  const allowlist = host.T3CODE_PROVIDER_ENV_ALLOWLIST ?? baseEnv.T3CODE_PROVIDER_ENV_ALLOWLIST;
+  if (allowlist !== undefined) {
+    const platform = yield* HostProcess.Platform;
+    const canonical = (name: string) => (platform === "win32" ? name.toUpperCase() : name);
+    const allowed = new Set(allowlist.split(",").map((name) => canonical(name.trim())));
+    // Undefined entries remove inherited values even in launchers that extend process.env.
+    baseEnv = Object.fromEntries(
+      Object.keys({ ...host, ...baseEnv }).map((name) => [
+        name,
+        allowed.has(canonical(name)) ? baseEnv[name] : undefined,
+      ]),
+    );
+  }
   if (!environment || environment.length === 0) {
     return baseEnv;
   }

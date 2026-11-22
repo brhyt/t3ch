@@ -72,3 +72,24 @@ describe("mergeProviderInstanceEnvironment", () => {
     }),
   );
 });
+
+it.effect("restricts inherited credentials while retaining explicit provider values", () =>
+  Effect.gen(function* () {
+    const env = yield* mergeProviderInstanceEnvironment(
+      [{ name: "PROVIDER_TOKEN", value: "explicit-fixture", sensitive: true }],
+      { PATH: "/bin", DATABASE_URL: "private-fixture", PROVIDER_TOKEN: "old-fixture" },
+    );
+    expect(env.PATH).toBe("/bin");
+    expect(env.DATABASE_URL).toBeUndefined();
+    expect(env.PROVIDER_TOKEN).toBe("explicit-fixture");
+    expect(env.HOST_ONLY_TOKEN).toBeUndefined();
+    expect(Object.hasOwn(env, "HOST_ONLY_TOKEN")).toBe(true);
+    const empty = yield* mergeProviderInstanceEnvironment(undefined, { DATABASE_URL: "private" });
+    expect(empty.DATABASE_URL).toBeUndefined();
+  }).pipe(
+    Effect.provideService(HostProcess.Environment, {
+      T3CODE_PROVIDER_ENV_ALLOWLIST: "PATH",
+      HOST_ONLY_TOKEN: "fixture",
+    }),
+  ),
+);
