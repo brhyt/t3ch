@@ -101,12 +101,8 @@ function ObserverPanel({ environmentId }: { environmentId: EnvironmentId }) {
   async function apply(rule: PrivacyRule) {
     if (pending || !canChange) return;
     setPending(true);
-    try {
-      const result = await change({ environmentId, input: rule });
-      if (result._tag === "Success") refresh();
-    } finally {
-      setPending(false);
-    }
+    const result = await change({ environmentId, input: rule }).finally(() => setPending(false));
+    if (result._tag === "Success") refresh();
   }
   if (!canRead)
     return (
