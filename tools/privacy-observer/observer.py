@@ -42,15 +42,14 @@ class Observer:
             "blocked" if blocked else "pending",
         )
         if inspection_error:
-            self.journal.update(flow.metadata["privacy_event"], "not inspected; body decoding failed")
-        flow.metadata["privacy_inspection_error"] = inspection_error
+            self.journal.inspection_failed(flow.metadata["privacy_event"])
         flow.metadata["privacy_blocked"] = blocked
         if blocked:
             flow.response = http.Response.make(403, b"Blocked by the local privacy observer", {"content-type": "text/plain"})
 
     def response(self, flow):
         identifier = flow.metadata.get("privacy_event")
-        if identifier and not flow.metadata.get("privacy_blocked") and not flow.metadata.get("privacy_inspection_error"):
+        if identifier and not flow.metadata.get("privacy_blocked"):
             self.journal.update(identifier, f"response {flow.response.status_code}")
 
     def error(self, flow):
@@ -58,7 +57,11 @@ class Observer:
         if identifier:
             self.journal.update(identifier, "error; delivery uncertain")
         else:
-            self.journal.add(flow.request.host, flow.request.method, b"", [], "", "not inspected; connection error")
+            request = flow.request
+            address = flow.server_conn.address
+            host = request.host if request else address[0] if address else "unknown"
+            method = request.method if request else "CONNECT"
+            self.journal.add(host, method, b"", [], "", "not inspected; connection error")
 
     def websocket_message(self, flow):
         message = flow.websocket.messages[-1]
@@ -113,7 +116,7 @@ def dashboard(journal, token, port):
                 data = json.loads(self.rfile.read(length))
                 if not isinstance(data, dict):
                     raise ValueError()
-                journal.change(data["action"], data.get("host", ""))
+                journal.change(data["action"], data.get("host", ""), data.get("findingId", ""))
                 self.send(200, b'{"ok":true}')
             except (ValueError, TypeError, KeyError):
                 self.send(400, b'{"error":"Invalid rule"}')
@@ -129,7 +132,7 @@ async def run(args):
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     directory.chmod(0o700)
     os.umask(0o077)
-    journal = Journal(args.label)
+    journal = Journal(args.label, findings_path=None if args.ephemeral else directory / "findings.sqlite", retention_days=args.retention_days)
     token = secrets.token_urlsafe(32)
     opts = options.Options(listen_host="127.0.0.1", listen_port=args.proxy_port, confdir=str(directory))
     master = DumpMaster(opts, with_termlog=False, with_dumper=False)
@@ -157,6 +160,7 @@ async def run(args):
             pass
         server.shutdown()
         server.server_close()
+        journal.close()
 
 
 if __name__ == "__main__":
@@ -165,5 +169,7 @@ if __name__ == "__main__":
     parser.add_argument("--proxy-port", type=int, default=8899)
     parser.add_argument("--dashboard-port", type=int, default=8898)
     parser.add_argument("--state-dir", default=".t3-privacy")
+    parser.add_argument("--ephemeral", action="store_true", help="Keep masked findings in memory only")
+    parser.add_argument("--retention-days", type=int, choices=range(1, 91), default=30, metavar="1..90", help="Masked findings retention; at most 500 aggregate findings")
     parser.add_argument("--upstream-ca", help="CA for a private upstream; upstream TLS verification stays enabled")
     asyncio.run(run(parser.parse_args()))

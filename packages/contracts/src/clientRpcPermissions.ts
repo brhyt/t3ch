@@ -1,3 +1,4 @@
+import { AuthRelayWriteScope } from "./auth.ts";
 import * as Schema from "effect/Schema";
 import { GitPreparePullRequestThreadInput } from "./git.ts";
 import {
@@ -5,6 +6,7 @@ import {
   AuthPreviewOperateScope,
   AuthOrchestrationOperateScope,
   AuthSettingsWriteScope,
+  AuthProvidersManageScope,
   AuthSourceControlWriteScope,
   type AuthEnvironmentScope,
 } from "./auth.ts";
@@ -13,6 +15,8 @@ import { WS_METHODS } from "./rpc.ts";
 
 /** Incremental client enforcement; the server still authorizes every request. */
 export const CLIENT_GUARDED_RPC_SCOPES = {
+  [WS_METHODS.privacyActivityChange]: AuthRelayWriteScope,
+  [WS_METHODS.privacyProviderChange]: AuthProvidersManageScope,
   [WS_METHODS.privacyChange]: AuthSettingsWriteScope,
   [WS_METHODS.previewDesign]: AuthFilesystemWriteScope,
 

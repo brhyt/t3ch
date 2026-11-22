@@ -9,16 +9,25 @@ export const mergeProviderInstanceEnvironment = Effect.fn(function* (
   baseEnv: NodeJS.ProcessEnv = process.env,
 ) {
   const host = yield* HostProcess.Environment;
-  const allowlist = host.T3CODE_PROVIDER_ENV_ALLOWLIST ?? baseEnv.T3CODE_PROVIDER_ENV_ALLOWLIST;
-  if (allowlist !== undefined) {
+  const hostAllowlist = host.T3CODE_PROVIDER_ENV_ALLOWLIST ?? baseEnv.T3CODE_PROVIDER_ENV_ALLOWLIST;
+  const instanceAllowlist = environment?.find(
+    (variable) => variable.name.toUpperCase() === "T3CODE_PROVIDER_ENV_ALLOWLIST",
+  )?.value;
+  const allowlists = [
+    hostAllowlist,
+    typeof instanceAllowlist === "string" ? instanceAllowlist : undefined,
+  ].filter((value) => value !== undefined);
+  if (allowlists.length > 0) {
     const platform = yield* HostProcess.Platform;
     const canonical = (name: string) => (platform === "win32" ? name.toUpperCase() : name);
-    const allowed = new Set(allowlist.split(",").map((name) => canonical(name.trim())));
+    const allowed = allowlists.map(
+      (list) => new Set(list.split(",").map((name) => canonical(name.trim()))),
+    );
     // Undefined entries remove inherited values even in launchers that extend process.env.
     baseEnv = Object.fromEntries(
       Object.keys({ ...host, ...baseEnv }).map((name) => [
         name,
-        allowed.has(canonical(name)) ? baseEnv[name] : undefined,
+        allowed.every((list) => list.has(canonical(name))) ? baseEnv[name] : undefined,
       ]),
     );
   }

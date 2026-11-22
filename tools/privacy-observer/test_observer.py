@@ -10,6 +10,7 @@ from observer import Observer, dashboard
 class ObserverTests(unittest.TestCase):
     def test_blocks_before_forwarding_and_unblocks_without_rewriting_old_outcomes(self):
         journal = Journal("test")
+        self.addCleanup(journal.close)
         addon = Observer(journal)
         flow = tflow.tflow()
         journal.change("block", flow.request.host)
@@ -28,18 +29,52 @@ class ObserverTests(unittest.TestCase):
 
     def test_reports_unsupported_encoding_without_claiming_inspection(self):
         journal = Journal("test")
+        self.addCleanup(journal.close)
         addon = Observer(journal)
         flow = tflow.tflow()
         flow.request.headers["content-encoding"] = "gzip"
         flow.request.raw_content = b"not a gzip stream"
         addon.request(flow)
-        self.assertIn("not inspected", journal.snapshot()["events"][0]["status"])
+        self.assertIn("not inspected", journal.snapshot()["events"][0]["inspection"])
         flow.response = tflow.tresp()
         addon.response(flow)
-        self.assertIn("not inspected", journal.snapshot()["events"][0]["status"])
+        self.assertIn("not inspected", journal.snapshot()["events"][0]["inspection"])
+
+        self.assertEqual(journal.snapshot()["events"][0]["status"], "response 200")
+
+    def test_blocked_decode_failure_preserves_both_coverage_and_block_evidence(self):
+        journal = Journal("test")
+        self.addCleanup(journal.close)
+        addon = Observer(journal)
+        flow = tflow.tflow()
+        flow.request.headers["content-encoding"] = "gzip"
+        flow.request.raw_content = b"not a gzip stream"
+        journal.change("block", flow.request.host)
+        addon.request(flow)
+        addon.response(flow)
+        report = journal.snapshot()
+        self.assertEqual(flow.response.status_code, 403)
+        gap = next(issue for issue in report["issues"] if issue["kind"] == "inspection failed")
+        self.assertEqual(gap["blocked"], 1)
+        self.assertEqual(gap["lastOutcome"], "blocked")
+        self.assertEqual(report["events"][0]["status"], "blocked")
+        self.assertIn("not inspected", report["events"][0]["inspection"])
+
+    def test_connection_error_before_request_is_recorded_as_uninspected(self):
+        journal = Journal("test")
+        self.addCleanup(journal.close)
+        flow = tflow.tflow()
+        flow.request = None
+        flow.server_conn.address = ("unreachable.test", 443)
+        Observer(journal).error(flow)
+        report = journal.snapshot()
+        self.assertEqual(report["events"][0]["host"], "unreachable.test")
+        self.assertIn("not inspected", report["events"][0]["status"])
+        self.assertEqual(report["issues"][0]["kind"], "inspection failed")
 
     def test_websocket_block_drops_client_message(self):
         journal = Journal("test")
+        self.addCleanup(journal.close)
         addon = Observer(journal)
         flow = tflow.twebsocketflow()
         message = flow.websocket.messages[-1]
@@ -51,6 +86,7 @@ class ObserverTests(unittest.TestCase):
 
     def test_dashboard_requires_token_for_data_and_mutations(self):
         journal = Journal("test")
+        self.addCleanup(journal.close)
         server = dashboard(journal, "fixture-token", 0)
         base = f"http://127.0.0.1:{server.server_port}"
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))

@@ -1,3 +1,4 @@
+import * as PrivacyControls from "./privacy/PrivacyControls.ts";
 import * as BrowserDesign from "./preview/BrowserDesign.ts";
 import * as DesignChanges from "./preview/DesignChanges.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
@@ -691,6 +692,7 @@ const layerMakeRoutes = Layer.mergeAll(
     Layer.provide(McpOAuth.layerMcpClientAuthenticator),
   ),
 ).pipe(
+  Layer.provide(PrivacyControls.layer),
   Layer.provide(
     PullRequestReviewGuideService.layer.pipe(Layer.provide(PullRequestReviewGuides.layer)),
   ),

@@ -5,6 +5,22 @@ import { createEnvironmentRpcCommand, createEnvironmentRpcQueryAtomFamily } from
 
 export function createPrivacyAtoms<R, E>(runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>) {
   return {
+    activity: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "privacy:activity",
+      tag: WS_METHODS.privacyActivity,
+    }),
+    activityChange: createEnvironmentRpcCommand(runtime, {
+      label: "privacy:activityChange",
+      tag: WS_METHODS.privacyActivityChange,
+    }),
+    controls: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "privacy:controls",
+      tag: WS_METHODS.privacyControls,
+    }),
+    providerChange: createEnvironmentRpcCommand(runtime, {
+      label: "privacy:providerChange",
+      tag: WS_METHODS.privacyProviderChange,
+    }),
     snapshot: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "privacy:snapshot",
       tag: WS_METHODS.privacySnapshot,

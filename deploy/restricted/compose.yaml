@@ -1,0 +1,75 @@
+services:
+  proxy:
+    build: .
+    image: ${T3_RESTRICTED_IMAGE:-t3-restricted-runner:local}
+    user: proxy
+    entrypoint: ["python3", "/usr/local/bin/restricted-proxy"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    pids_limit: 64
+    mem_limit: 256m
+    tmpfs: ["/tmp:mode=1777,size=64m"]
+    volumes:
+      - type: bind
+        source: ${T3_RESTRICTED_ALLOWLIST:-./allowed-domains.txt}
+        target: /etc/squid/allowed-domains.txt
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      restricted:
+        ipv4_address: 172.30.247.2
+      internet: {}
+    healthcheck:
+      test:
+        [CMD, python3, -c, "import socket; socket.create_connection(('127.0.0.1',3128),2).close()"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+  runner:
+    entrypoint: ["/usr/local/bin/restricted-entrypoint"]
+    image: ${T3_RESTRICTED_IMAGE:-t3-restricted-runner:local}
+    depends_on:
+      proxy:
+        condition: service_healthy
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN, SETUID, SETGID, SETPCAP, CHOWN]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    pids_limit: 256
+    mem_limit: 2g
+    tmpfs: ["/tmp:mode=1777,size=256m"]
+    environment:
+      HOME: /state/home
+      PATH: /state/home/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+      T3CODE_HOME: /state/t3
+      T3CODE_TELEMETRY_ENABLED: "false"
+      T3CODE_OTEL_SDK_DISABLED: "true"
+      T3PO_MEMORY_EXCHANGE_ENABLED: "false"
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+      HTTP_PROXY: http://172.30.247.2:3128
+      HTTPS_PROXY: http://172.30.247.2:3128
+      http_proxy: http://172.30.247.2:3128
+      https_proxy: http://172.30.247.2:3128
+      NODE_USE_ENV_PROXY: "1"
+      NO_PROXY: localhost,127.0.0.1,::1
+    volumes:
+      - state:/state
+      - type: bind
+        source: ${T3_RESTRICTED_WORKSPACE:?Set T3_RESTRICTED_WORKSPACE to a disposable project directory}
+        target: /workspace
+        bind:
+          create_host_path: false
+    working_dir: /workspace
+    networks:
+      restricted:
+        ipv4_address: 172.30.247.3
+networks:
+  restricted:
+    internal: true
+    ipam:
+      config: [{ subnet: 172.30.247.0/24 }]
+  internet: {}
+volumes:
+  state: {}

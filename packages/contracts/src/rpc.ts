@@ -1,4 +1,10 @@
-import { PrivacySnapshot, PrivacyRule, PrivacyObserverError } from "./privacy.ts";
+import {
+  PrivacySnapshot,
+  PrivacyRule,
+  PrivacyObserverError,
+  PrivacyControlsSnapshot,
+  PrivacyProviderChange,
+} from "./privacy.ts";
 import { BrowserDesignInput, BrowserDesignResult, BrowserDesignError } from "./browserDesign.ts";
 import {
   OrchestrationV2SearchThreadError,
@@ -470,6 +476,10 @@ export const WS_METHODS = {
   deviceAction: "device.action",
 
   serverProbe: "server.probe",
+  privacyActivity: "privacy.activity",
+  privacyActivityChange: "privacy.activityChange",
+  privacyControls: "privacy.controls",
+  privacyProviderChange: "privacy.providerChange",
   privacySnapshot: "privacy.snapshot",
   privacyChange: "privacy.change",
   serverGetConfig: "server.getConfig",
@@ -600,6 +610,26 @@ const WsServerProbeRpc = Rpc.make(WS_METHODS.serverProbe, {
   error: EnvironmentAuthorizationError,
 });
 
+const WsPrivacyActivityRpc = Rpc.make(WS_METHODS.privacyActivity, {
+  payload: Schema.Struct({}),
+  success: Schema.NullOr(Schema.Boolean),
+  error: Schema.Union([PrivacyObserverError, EnvironmentAuthorizationError]),
+});
+const WsPrivacyActivityChangeRpc = Rpc.make(WS_METHODS.privacyActivityChange, {
+  payload: Schema.Struct({ enabled: Schema.Boolean }),
+  success: Schema.Void,
+  error: Schema.Union([PrivacyObserverError, EnvironmentAuthorizationError]),
+});
+const WsPrivacyControlsRpc = Rpc.make(WS_METHODS.privacyControls, {
+  payload: Schema.Struct({}),
+  success: PrivacyControlsSnapshot,
+  error: Schema.Union([PrivacyObserverError, EnvironmentAuthorizationError]),
+});
+const WsPrivacyProviderChangeRpc = Rpc.make(WS_METHODS.privacyProviderChange, {
+  payload: PrivacyProviderChange,
+  success: Schema.Void,
+  error: Schema.Union([PrivacyObserverError, EnvironmentAuthorizationError]),
+});
 const WsPrivacySnapshotRpc = Rpc.make(WS_METHODS.privacySnapshot, {
   payload: Schema.Struct({}),
   success: PrivacySnapshot,
@@ -1889,6 +1919,10 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
 
 export const WsRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
+  WsPrivacyActivityRpc,
+  WsPrivacyActivityChangeRpc,
+  WsPrivacyControlsRpc,
+  WsPrivacyProviderChangeRpc,
   WsPrivacySnapshotRpc,
   WsPrivacyChangeRpc,
   WsServerGetConfigRpc,

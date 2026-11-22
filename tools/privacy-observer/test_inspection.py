@@ -8,6 +8,7 @@ class InspectionTests(unittest.TestCase):
         secret = "fixture-never-keep-this"
         body = json.dumps({"messages": [{"content": "owner@example.test postgres://user:fixture-pass@db.test/data"}], "password": secret}).encode()
         journal = Journal("codex test")
+        self.addCleanup(journal.close)
         journal.add("api.example.test", "POST", body, [("Authorization", "Bearer private-fixture")], "/private?token=hidden-query")
         report = journal.snapshot()
         rendered = json.dumps(report)
@@ -25,6 +26,7 @@ class InspectionTests(unittest.TestCase):
         result = inspect(b"x" * (SCAN_LIMIT + 5), [], "/")
         self.assertTrue(result["scanTruncated"])
         journal = Journal("test", capacity=2)
+        self.addCleanup(journal.close)
         first = journal.add("a.test", "POST", b"", [], "/")
         journal.add("b.test", "POST", b"", [], "/")
         journal.add("c.test", "POST", b"", [], "/")

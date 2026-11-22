@@ -222,6 +222,7 @@
       <div class="notice" id="coverage">
         Only traffic explicitly routed through this proxy is observed. No system-wide monitoring.
       </div>
+      <p id="tracking" role="status"></p>
       <div class="cards">
         <div class="card"><b id="count">0</b><span>Requests observed this session</span></div>
         <div class="card">
@@ -251,6 +252,28 @@
           <div id="rules" class="rules"></div>
         </section>
       </div>
+      <section>
+        <h2>Findings to review</h2>
+        <p>
+          Review acknowledges a finding; it does not prove a fix. The next occurrence reopens it.
+          Coverage gaps need testing even when no sensitive pattern matched.
+        </p>
+        <div class="table">
+          <table>
+            <thead>
+              <tr>
+                <th>Destination / source</th>
+                <th>Finding</th>
+                <th>Evidence</th>
+                <th>Review</th>
+              </tr>
+            </thead>
+            <tbody id="issues"></tbody>
+          </table>
+        </div>
+        <p id="noissues">No retained findings. This does not establish that traffic is safe.</p>
+        <button id="clearfindings">Clear saved findings</button>
+      </section>
       <div class="toolbar">
         <input
           id="search"
@@ -285,7 +308,8 @@
         are never stored in this journal or exported. Detection is heuristic: no findings does not
         mean no sensitive data. Authentication headers are shown separately as expected credentials.
         The last 2,000 events are kept in memory; stopping the observer discards them. Blocks are
-        destination rules, not a host firewall.
+        destination rules, not a host firewall. Masked finding aggregates are saved locally for up
+        to 30 days by default, limited to 500 records; see the retention status above.
       </footer>
     </main>
     <script>
@@ -319,9 +343,9 @@
           );
         return r.json();
       }
-      async function change(action, host) {
+      async function change(action, host, findingId) {
         try {
-          await api("/api/rules", { action, host });
+          await api("/api/rules", { action, host, findingId });
           await refresh();
         } catch (e) {
           $("error").textContent = e.message;
@@ -341,6 +365,48 @@
         $("blocked").textContent = state.blocked.length;
         $("session").textContent = "Session: " + state.label + " · local, in-memory journal";
         $("coverage").textContent = state.coverage;
+        const tracking = state.tracking;
+        $("tracking").textContent = tracking
+          ? "Last observation: " +
+            (tracking.lastObservedAt
+              ? new Date(tracking.lastObservedAt * 1000).toLocaleString()
+              : "none this session") +
+            " · Direct traffic: unknown · Findings: " +
+            (tracking.persistent
+              ? "saved locally, " + tracking.retentionDays + " day retention"
+              : "memory only") +
+            (tracking.persistenceError ? " · Storage error: saved history may be incomplete" : "")
+          : "Coverage status is unavailable from this observer version.";
+        const issues = state.issues || [];
+        $("noissues").hidden = issues.length > 0;
+        $("issues").replaceChildren(
+          ...issues.map((issue) => {
+            const row = el("tr", "");
+            const destination = el("td", issue.host);
+            destination.append(el("small", issue.source));
+            const finding = el("td", issue.kind);
+            finding.append(el("small", issue.location));
+            const evidence = el(
+              "td",
+              issue.occurrences + " occurrences · " + issue.blocked + " blocked",
+            );
+            evidence.append(
+              el("small", issue.lastOutcome),
+              el("small", "Last seen " + new Date(issue.lastSeen * 1000).toLocaleString()),
+            );
+            const review = el("td", issue.state);
+            const action = el("button", issue.state === "reviewed" ? "Reopen" : "Mark reviewed");
+            action.onclick = () =>
+              change(
+                issue.state === "reviewed" ? "reopen-finding" : "review-finding",
+                undefined,
+                issue.id,
+              );
+            review.append(document.createElement("br"), action);
+            row.append(destination, finding, evidence, review);
+            return row;
+          }),
+        );
         const groups = new Map();
         for (const e of state.events) groups.set(e.host, (groups.get(e.host) || 0) + e.bodyBytes);
         const dest = $("destinations");
@@ -429,6 +495,10 @@
       $("search").oninput = render;
       $("filter").onchange = render;
       $("clear").onclick = () => change("clear");
+      $("clearfindings").onclick = () => {
+        if (confirm("Clear saved findings? Request observations and block rules will remain."))
+          change("clear-findings");
+      };
       $("export").onclick = () => {
         const url = URL.createObjectURL(
           new Blob([JSON.stringify(state, null, 2)], { type: "application/json" }),

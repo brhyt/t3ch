@@ -64,6 +64,17 @@ class ProxyTests(unittest.TestCase):
                 api("/api/rules", {"action": "unblock", "host": "localhost"})
                 self.assertEqual(send(), "ok200")
                 self.assertEqual(len(received), 2)
+                report = api("/api/events")
+                self.assertTrue(report["tracking"]["persistent"])
+                self.assertEqual(report["tracking"]["observedThisSession"], 3)
+                self.assertEqual(report["tracking"]["directTraffic"], "unknown")
+                self.assertTrue(all(issue["occurrences"] == 3 and issue["blocked"] == 1 for issue in report["issues"]))
+                identifier = report["issues"][0]["id"]
+                api("/api/rules", {"action": "review-finding", "findingId": identifier})
+                self.assertEqual(next(issue["state"] for issue in api("/api/events")["issues"] if issue["id"] == identifier), "reviewed")
+                stored = (root / "state" / "findings.sqlite").read_bytes()
+                for value in (b"synthetic-secret-value", b"synthetic-query", b"person@example.test", b"/private"):
+                    self.assertNotIn(value, stored)
             finally:
                 process.terminate()
                 process.communicate(timeout=10)

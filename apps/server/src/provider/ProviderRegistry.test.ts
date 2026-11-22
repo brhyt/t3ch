@@ -364,7 +364,7 @@ function makeMutableServerSettingsService(
           const current = yield* Ref.get(settingsRef);
           const next = ServerSettingsModule.applyProviderInstanceMutation(
             applyServerSettingsPatch(current, patch),
-            mutation,
+            typeof mutation === "function" ? yield* mutation(current) : mutation,
           );
           encodeServerSettings(next);
           yield* Ref.set(settingsRef, next);

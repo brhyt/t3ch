@@ -183,7 +183,11 @@ export class ServerSettingsService extends Context.Service<
     ) => Effect.Effect<ServerSettings, ServerSettingsError>;
 
     readonly updateProviderInstance: (
-      mutation: ProviderInstanceMutation,
+      mutation:
+        | ProviderInstanceMutation
+        | ((
+            settings: ServerSettings,
+          ) => Effect.Effect<ProviderInstanceMutation, ServerSettingsError>),
       patch?: ServerSettingsPatch,
     ) => Effect.Effect<ServerSettings, ServerSettingsError>;
 
@@ -244,13 +248,15 @@ const makeTest = (overrides: DeepPartial<ServerSettings> = {}) =>
       updateProviderInstance: (mutation, patch = {}) =>
         updateTestSettings((currentSettings) =>
           Effect.gen(function* () {
+            const resolvedMutation =
+              typeof mutation === "function" ? yield* mutation(currentSettings) : mutation;
             yield* ensureProviderInstanceMutationAllowed(
               currentSettings,
-              mutation,
+              resolvedMutation,
               "test settings",
             );
             const patched = applyServerSettingsPatch(currentSettings, patch);
-            return applyProviderInstanceMutation(patched, mutation);
+            return applyProviderInstanceMutation(patched, resolvedMutation);
           }),
         ),
       withSettingsSnapshot: (use) =>
@@ -1155,9 +1161,11 @@ const make = Effect.gen(function* () {
     updateProviderInstance: (mutation, patch = {}) =>
       updateAndPersistSettings((current) =>
         Effect.gen(function* () {
-          yield* ensureProviderInstanceMutationAllowed(current, mutation, settingsPath);
+          const resolvedMutation =
+            typeof mutation === "function" ? yield* mutation(current) : mutation;
+          yield* ensureProviderInstanceMutationAllowed(current, resolvedMutation, settingsPath);
           const patched = applyServerSettingsPatch(current, patch);
-          return applyProviderInstanceMutation(patched, mutation);
+          return applyProviderInstanceMutation(patched, resolvedMutation);
         }),
       ),
     withSettingsSnapshot,

@@ -1,0 +1,3 @@
+# Empty means deny all. Add exact HTTPS destinations required by this task.
+# Example (not enabled): api.openai.com
+# A listed service can receive any data the agent can read.

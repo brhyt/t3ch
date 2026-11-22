@@ -62,7 +62,16 @@ const make = Effect.gen(function* () {
       );
     }),
     change: Effect.fn("PrivacyObserver.change")(function* (input) {
-      if (input.action !== "clear" && (!input.host || !/^[A-Za-z0-9.-]{1,253}$/.test(input.host))) {
+      if (
+        (input.action === "block" || input.action === "unblock") &&
+        (!input.host || !/^[A-Za-z0-9.-]{1,253}$/.test(input.host))
+      ) {
+        return yield* new PrivacyObserverError({ reason: "invalid_rule" });
+      }
+      if (
+        (input.action === "review-finding" || input.action === "reopen-finding") &&
+        !/^[a-f0-9]{1,64}$/.test(input.findingId ?? "")
+      ) {
         return yield* new PrivacyObserverError({ reason: "invalid_rule" });
       }
       yield* request(input);

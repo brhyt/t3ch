@@ -38,7 +38,13 @@ describe("RPC authorization scopes", () => {
 
   it("reserves privacy observations for diagnostics readers and block rules for settings writers", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.privacySnapshot)).toBe(AuthDiagnosticsReadScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.privacyControls)).toBe(AuthDiagnosticsReadScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.privacyProviderChange)).toBe(
+      AuthProvidersManageScope,
+    );
     expect(requiredScopeForRpcMethod(WS_METHODS.privacyChange)).toBe(AuthSettingsWriteScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.privacyActivity)).toBe(AuthRelayReadScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.privacyActivityChange)).toBe(AuthRelayWriteScope);
   });
 
   it("requires operate access to stop a workflow", () => {

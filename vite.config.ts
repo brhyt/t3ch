@@ -71,6 +71,7 @@ export default defineConfig({
     ],
   },
   staged: {
+    "*.{json,toml}": () => "node scripts/check-agent-secrets.mjs",
     "*": "vp fmt --no-error-on-unmatched-pattern",
   },
   fmt: {

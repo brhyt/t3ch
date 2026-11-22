@@ -1,0 +1,7 @@
+FROM node:26-bookworm-slim@sha256:5df79989ed685e09f0a98019db4cebfb22fb9df1a53c0161664a011f7ff6b0f1
+RUN apt-get update && apt-get install -y --no-install-recommends squid iptables util-linux ca-certificates git curl python3 && rm -rf /var/lib/apt/lists/*
+COPY entrypoint.sh /usr/local/bin/restricted-entrypoint
+COPY proxy.py /usr/local/bin/restricted-proxy
+RUN chmod 755 /usr/local/bin/restricted-entrypoint /usr/local/bin/restricted-proxy
+ENTRYPOINT ["/usr/local/bin/restricted-entrypoint"]
+CMD ["bash"]

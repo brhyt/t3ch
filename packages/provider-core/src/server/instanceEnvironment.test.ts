@@ -93,3 +93,35 @@ it.effect("restricts inherited credentials while retaining explicit provider val
     }),
   ),
 );
+
+it.effect(
+  "intersects provider and host allowlists without losing proxy trust or explicit credentials",
+  () =>
+    Effect.gen(function* () {
+      const env = yield* mergeProviderInstanceEnvironment(
+        [
+          {
+            name: "T3CODE_PROVIDER_ENV_ALLOWLIST",
+            value: "PATH,HTTPS_PROXY,NODE_EXTRA_CA_CERTS,HOST_SECRET",
+            sensitive: false,
+          },
+          { name: "PROVIDER_KEY", value: "explicit-fixture", sensitive: true },
+        ],
+        {
+          PATH: "/bin",
+          HTTPS_PROXY: "http://127.0.0.1:8899",
+          NODE_EXTRA_CA_CERTS: "/private/ca.pem",
+          HOST_SECRET: "fixture",
+        },
+      );
+      expect(env.PATH).toBe("/bin");
+      expect(env.HTTPS_PROXY).toBe("http://127.0.0.1:8899");
+      expect(env.NODE_EXTRA_CA_CERTS).toBe("/private/ca.pem");
+      expect(env.HOST_SECRET).toBeUndefined();
+      expect(env.PROVIDER_KEY).toBe("explicit-fixture");
+    }).pipe(
+      Effect.provideService(HostProcess.Environment, {
+        T3CODE_PROVIDER_ENV_ALLOWLIST: "PATH,HTTPS_PROXY,NODE_EXTRA_CA_CERTS",
+      }),
+    ),
+);

@@ -1,3 +1,4 @@
+import * as PrivacyControls from "./privacy/PrivacyControls.ts";
 import * as PrivacyObserver from "./privacy/PrivacyObserver.ts";
 import * as BrowserDesign from "./preview/BrowserDesign.ts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
@@ -1166,6 +1167,7 @@ const layerWsRpc = (
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
   serverBrowser: ServerBrowser.ServerBrowser["Service"],
   browserDesign: BrowserDesign.BrowserDesign["Service"],
+  privacyControls: PrivacyControls.PrivacyControls["Service"],
 ) =>
   ServerWsRpcGroup.toLayer(
     Effect.gen(function* () {
@@ -2073,6 +2075,11 @@ const layerWsRpc = (
             Effect.andThen(scheduledTasks.getWebhookDelivery(input)),
           ),
         [WS_METHODS.serverProbe]: (_input) => Effect.succeed({}),
+        [WS_METHODS.privacyActivity]: () => privacyControls.activity(),
+        [WS_METHODS.privacyActivityChange]: (input) =>
+          privacyControls.changeActivity(input.enabled),
+        [WS_METHODS.privacyControls]: () => privacyControls.snapshot(),
+        [WS_METHODS.privacyProviderChange]: (input) => privacyControls.changeProvider(input),
         [WS_METHODS.privacySnapshot]: () => privacyObserver.snapshot(),
         [WS_METHODS.privacyChange]: (input) => privacyObserver.change(input),
         [WS_METHODS.serverGetConfig]: (_input) => loadServerConfig({ usageLimitsCommand: false }),
@@ -3122,6 +3129,7 @@ export const WS_RPC_SERVER_OPTIONS = {
 
 export const layer = Layer.unwrap(
   Effect.gen(function* () {
+    const privacyControls = yield* PrivacyControls.PrivacyControls;
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
     const serverBrowser = yield* ServerBrowser.ServerBrowser;
     const browserDesign = yield* BrowserDesign.BrowserDesign;
@@ -3183,6 +3191,7 @@ export const layer = Layer.unwrap(
               previewAutomationBroker,
               serverBrowser,
               browserDesign,
+              privacyControls,
             ).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               // Request fibers run in the handlers' context, so this reporter sees
