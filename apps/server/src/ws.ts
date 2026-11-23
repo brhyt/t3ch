@@ -1,3 +1,4 @@
+import * as PrivacySources from "./privacy/PrivacySources.ts";
 import * as PrivacyControls from "./privacy/PrivacyControls.ts";
 import * as PrivacyObserver from "./privacy/PrivacyObserver.ts";
 import * as BrowserDesign from "./preview/BrowserDesign.ts";
@@ -1161,8 +1162,16 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
 );
 
 // Keep the observer schemas outside the large handler map to bound RPC type instantiation.
-const MainWsRpcGroup = ServerWsRpcGroup.omit(WS_METHODS.privacySnapshot, WS_METHODS.privacyChange);
-const layerPrivacyObserverRpc = Layer.merge(
+const MainWsRpcGroup = ServerWsRpcGroup.omit(
+  WS_METHODS.privacySnapshot,
+  WS_METHODS.privacyChange,
+  WS_METHODS.privacySources,
+);
+const layerPrivacyObserverRpc = Layer.mergeAll(
+  ServerWsRpcGroup.toLayerHandler(
+    WS_METHODS.privacySources,
+    Effect.map(PrivacySources.PrivacySources, (sources) => () => sources.snapshots()),
+  ),
   ServerWsRpcGroup.toLayerHandler(
     WS_METHODS.privacySnapshot,
     Effect.map(PrivacyObserver.PrivacyObserver, (observer) => () => observer.snapshot()),
@@ -1171,7 +1180,7 @@ const layerPrivacyObserverRpc = Layer.merge(
     WS_METHODS.privacyChange,
     Effect.map(PrivacyObserver.PrivacyObserver, (observer) => (input) => observer.change(input)),
   ),
-).pipe(Layer.provide(PrivacyObserver.layer));
+).pipe(Layer.provide(PrivacySources.layer.pipe(Layer.provideMerge(PrivacyObserver.layer))));
 
 const layerWsRpc = (
   currentSession: EnvironmentAuth.AuthenticatedSession,

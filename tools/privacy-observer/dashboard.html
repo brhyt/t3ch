@@ -309,7 +309,9 @@
         mean no sensitive data. Authentication headers are shown separately as expected credentials.
         The last 2,000 events are kept in memory; stopping the observer discards them. Blocks are
         destination rules, not a host firewall. Masked finding aggregates are saved locally for up
-        to 30 days by default, limited to 500 records; see the retention status above.
+        with rolling inactivity expiry from last seen (30 days by default), limited to 500 records.
+        Recurring counts may span longer. Experiments persist separately until explicitly deleted;
+        deletion is not secure erasure.
       </footer>
     </main>
     <script>
@@ -373,7 +375,7 @@
               : "none this session") +
             " · Direct traffic: unknown · Findings: " +
             (tracking.persistent
-              ? "saved locally, " + tracking.retentionDays + " day retention"
+              ? "saved locally, " + tracking.retentionDays + " day inactivity expiry"
               : "memory only") +
             (tracking.persistenceError ? " · Storage error: saved history may be incomplete" : "")
           : "Coverage status is unavailable from this observer version.";

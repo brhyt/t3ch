@@ -41,6 +41,7 @@ export const RPC_REQUIRED_SCOPES = {
   ...CLIENT_GUARDED_RPC_SCOPES,
   [WS_METHODS.privacyActivity]: AuthRelayReadScope,
   [WS_METHODS.privacyControls]: AuthDiagnosticsReadScope,
+  [WS_METHODS.privacySources]: AuthDiagnosticsReadScope,
   [WS_METHODS.privacySnapshot]: AuthDiagnosticsReadScope,
   [WS_METHODS.serverGetProviderSkillActions]: AuthFilesystemReadScope,
   [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: AuthOrchestrationOperateScope,

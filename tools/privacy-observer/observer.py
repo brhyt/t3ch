@@ -28,8 +28,16 @@ class Observer:
         host = address[0] if address else "unknown"
         self.journal.add(host, "TLS", b"", [], "", "not inspected; TLS handshake failed")
 
+    def http_connect(self, flow):
+        # CONNECT credentials are consumed before tunnelling, never forwarded upstream.
+        header = flow.request.headers.pop("proxy-authorization", "")
+        flow.client_conn.__dict__["privacy_route_key"] = self.journal.launches.route_key(header)
+
     def request(self, flow):
         request = flow.request
+        key = self.journal.launches.route_key(request.headers.pop("proxy-authorization", "")) or flow.client_conn.__dict__.get("privacy_route_key", "")
+        attribution = self.journal.launches.resolve_key(key)
+        flow.metadata["privacy_route_key"] = key
         blocked = self.journal.is_blocked(request.host)
         try:
             body = request.content or b""
@@ -39,7 +47,7 @@ class Observer:
             inspection_error = True
         flow.metadata["privacy_event"] = self.journal.add(
             request.host, request.method, body, list(request.headers.items()), request.path,
-            "blocked" if blocked else "pending",
+            "blocked" if blocked else "pending", attribution=attribution,
         )
         if inspection_error:
             self.journal.inspection_failed(flow.metadata["privacy_event"])
@@ -67,7 +75,7 @@ class Observer:
         message = flow.websocket.messages[-1]
         if message.from_client:
             blocked = self.journal.is_blocked(flow.request.host)
-            self.journal.add(flow.request.host, "WS", message.content, [], "", "blocked" if blocked else "outbound WebSocket")
+            self.journal.add(flow.request.host, "WS", message.content, [], "", "blocked" if blocked else "outbound WebSocket", attribution=self.journal.launches.resolve_key(flow.metadata.get("privacy_route_key", "")))
             if blocked:
                 message.drop()
 
@@ -106,7 +114,7 @@ def dashboard(journal, token, port):
                 self.send(401, b'{"error":"Unauthorized"}')
 
         def do_POST(self):
-            if self.path != "/api/rules" or not self.authorized():
+            if self.path not in {"/api/rules", "/api/launches"} or not self.authorized():
                 self.send(401, b'{"error":"Unauthorized"}')
                 return
             try:
@@ -116,10 +124,14 @@ def dashboard(journal, token, port):
                 data = json.loads(self.rfile.read(length))
                 if not isinstance(data, dict):
                     raise ValueError()
-                journal.change(data["action"], data.get("host", ""), data.get("findingId", ""), data.get("durationSeconds"), data.get("experimentId", ""))
+                if self.path == "/api/launches":
+                    self.send(200, json.dumps(journal.launches.change(data)).encode())
+                    return
+                journal.change(data["action"], data.get("host", ""), data.get("findingId", ""), data.get("durationSeconds"), data.get("experimentId", ""), data.get("metadata"), data.get("outcome"))
                 self.send(200, b'{"ok":true}')
-            except (ValueError, TypeError, KeyError):
-                self.send(400, b'{"error":"Invalid rule"}')
+            except (ValueError, TypeError, KeyError) as error:
+                reason = str(error) if str(error) in {'capacity', 'active_experiment', 'unknown_experiment'} else 'invalid_rule'
+                self.send(400, json.dumps({'reason': reason}).encode())
 
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     server.daemon_threads = True
@@ -143,7 +155,7 @@ async def run(args):
     connection_file = directory / "observer.json"
     def ready():
         temporary = directory / f"observer-{secrets.token_hex(8)}.tmp"
-        temporary.write_text(json.dumps({"port": server.server_port, "token": token}))
+        temporary.write_text(json.dumps({"port": server.server_port, "token": token, "proxyPort": args.proxy_port}))
         temporary.chmod(0o600)
         temporary.replace(connection_file)
         print(json.dumps({"dashboard": f"http://127.0.0.1:{server.server_port}/#{token}",

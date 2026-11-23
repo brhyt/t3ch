@@ -104,6 +104,12 @@ class ObserverTests(unittest.TestCase):
                 request("/api/rules", {"action": "block", "host": "api.test"}, "wrong")
             request("/api/rules", {"action": "block", "host": "api.test"}, "fixture-token").close()
             self.assertTrue(journal.is_blocked("api.test"))
+            with self.assertRaises(urllib.error.HTTPError):
+                request("/api/launches", dict(action="register", providerInstanceId="codex", initiatingThreadId="thread"), "wrong")
+            with request("/api/launches", dict(action="register", providerInstanceId="codex", initiatingThreadId="thread"), "fixture-token") as response:
+                lease = json.load(response)
+                self.assertEqual(len(lease["launchId"]), 32)
+            request("/api/launches", dict(action="revoke", launchId=lease["launchId"]), "fixture-token").close()
             with request("/api/events", token="fixture-token") as response:
                 self.assertEqual(json.load(response)["blocked"], ["api.test"])
                 self.assertEqual(response.headers["Cache-Control"], "no-store")

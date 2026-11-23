@@ -1,6 +1,24 @@
 import * as Schema from "effect/Schema";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
+const SafeExperimentIdentifier = Schema.String.check(
+  Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
+);
+const ExperimentOutcome = Schema.Literals(["unknown", "succeeded", "partial", "failed"]);
+const ExperimentMetadata = Schema.Struct({
+  taskRef: Schema.optional(SafeExperimentIdentifier),
+  provider: Schema.optional(SafeExperimentIdentifier),
+  providerVersion: Schema.optional(SafeExperimentIdentifier),
+  provenance: Schema.Literal("operator-asserted"),
+  settings: Schema.optional(
+    Schema.Struct({
+      telemetry: Schema.optional(Schema.Literals(["on", "off", "unknown"])),
+      proxy: Schema.optional(Schema.Literals(["configured", "unknown"])),
+      inheritance: Schema.optional(Schema.Literals(["restricted", "unrestricted", "unknown"])),
+    }),
+  ),
+});
+
 export const PrivacyRule = Schema.Struct({
   action: Schema.Literals([
     "block",
@@ -8,6 +26,9 @@ export const PrivacyRule = Schema.Struct({
     "remove-policy",
     "start-experiment",
     "stop-experiment",
+    "delete-experiment",
+    "experiment-metadata",
+    "experiment-outcome",
     "finish-experiment",
     "unblock",
     "clear",
@@ -15,6 +36,8 @@ export const PrivacyRule = Schema.Struct({
     "reopen-finding",
     "clear-findings",
   ]),
+  metadata: Schema.optional(ExperimentMetadata),
+  outcome: Schema.optional(ExperimentOutcome),
   durationSeconds: Schema.optional(
     Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 3600 })),
   ),
@@ -29,7 +52,30 @@ const PrivacyCounters = Schema.Struct({
   responses: Schema.Number,
   errors: Schema.Number,
 });
+const DestinationCounters = Schema.Array(
+  Schema.Struct({
+    host: Schema.String.check(Schema.isMaxLength(253)),
+    ...PrivacyCounters.fields,
+  }),
+).check(Schema.isMaxLength(64));
 export const PrivacyJournal = Schema.Struct({
+  supportedActions: Schema.optional(Schema.Array(PrivacyRule.fields.action)),
+  generatedAt: Schema.optional(Schema.Number),
+  component: Schema.optional(
+    Schema.Struct({ name: Schema.String, version: Schema.String, identityKind: Schema.String }),
+  ),
+  observationWindow: Schema.optional(
+    Schema.Struct({
+      startedAt: Schema.Number,
+      endedAt: Schema.Number,
+      retainedEvents: Schema.Number,
+      capacity: Schema.Number,
+      truncated: Schema.Boolean,
+    }),
+  ),
+  retention: Schema.optional(
+    Schema.Struct({ events: Schema.String, findings: Schema.String, experiments: Schema.String }),
+  ),
   policyStorage: Schema.optional(
     Schema.Struct({
       status: Schema.Literals(["ready", "ephemeral", "unavailable"]),
@@ -70,7 +116,17 @@ export const PrivacyJournal = Schema.Struct({
         baseline: PrivacyCounters,
         blocked: PrivacyCounters,
         recovery: PrivacyCounters,
-        outcome: Schema.Literal("unknown"),
+        outcome: ExperimentOutcome,
+        metadata: Schema.optional(ExperimentMetadata),
+        outcomeSource: Schema.optional(Schema.Literals(["unknown", "user-reported"])),
+        destinations: Schema.optional(
+          Schema.Struct({
+            baseline: DestinationCounters,
+            blocked: DestinationCounters,
+            recovery: DestinationCounters,
+          }),
+        ),
+        destinationsTruncated: Schema.optional(Schema.Boolean),
         evidence: Schema.Literal("bounded-proxy-observations"),
       }),
     ),
@@ -110,6 +166,29 @@ export const PrivacyJournal = Schema.Struct({
   ),
   events: Schema.Array(
     Schema.Struct({
+      launchAttribution: Schema.optional(
+        Schema.Struct({
+          evidence: Schema.Literals(["launch-linked", "timing-correlated", "unknown"]),
+          component: Schema.optional(Schema.Literal("codex-app-server")),
+          providerInstanceId: Schema.optional(Schema.String),
+          launchId: Schema.optional(Schema.String),
+          initiatingThreadId: Schema.optional(Schema.String),
+          workflow: Schema.Literal("unknown"),
+        }),
+      ),
+      stages: Schema.optional(
+        Schema.Struct({
+          connection: Schema.optional(Schema.Literal("failed")),
+          handshake: Schema.optional(Schema.Literal("failed")),
+          inspection: Schema.Literals(["performed", "failed", "not-observed"]),
+          forwarding: Schema.Literals([
+            "blocked",
+            "response-observed",
+            "error-delivery-unknown",
+            "unknown",
+          ]),
+        }),
+      ),
       id: Schema.Number,
       time: Schema.Number,
       source: Schema.String,
@@ -127,6 +206,11 @@ export const PrivacyJournal = Schema.Struct({
           location: Schema.String,
           count: Schema.Number,
           expected: Schema.Boolean,
+          detectorId: Schema.optional(Schema.String),
+          context: Schema.optional(Schema.Literals(["unknown", "schema", "authentication-shaped"])),
+          destinationExpectation: Schema.optional(Schema.Literal("unknown")),
+          valuePresence: Schema.optional(Schema.Literals(["present", "empty", "unknown"])),
+          valueType: Schema.optional(Schema.Literals(["string", "unknown"])),
         }),
       ),
     }),
@@ -136,9 +220,23 @@ export type PrivacyJournal = typeof PrivacyJournal.Type;
 export const PrivacySnapshot = Schema.NullOr(PrivacyJournal);
 export class PrivacyObserverError extends Schema.TaggedError<PrivacyObserverError>()(
   "PrivacyObserverError",
-  { reason: Schema.Literals(["unavailable", "invalid_rule", "invalid_control"]) },
+  {
+    reason: Schema.Literals([
+      "unavailable",
+      "invalid_rule",
+      "invalid_control",
+      "capacity",
+      "active_experiment",
+      "unknown_experiment",
+    ]),
+  },
 ) {
   override get message() {
+    if (this.reason === "capacity")
+      return "Privacy record capacity reached. Delete finished experiments or remove unused rules.";
+    if (this.reason === "active_experiment")
+      return "Finish the active experiment before deleting it or starting another for this host.";
+    if (this.reason === "unknown_experiment") return "The experiment no longer exists.";
     if (this.reason === "invalid_control")
       return "This privacy control is not supported for the selected provider.";
     return this.reason === "invalid_rule"

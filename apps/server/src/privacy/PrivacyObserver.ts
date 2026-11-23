@@ -12,6 +12,7 @@ const Connection = Schema.Struct({
   port: Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 65535 })),
   token: Schema.String.check(Schema.isMinLength(32), Schema.isMaxLength(256)),
 });
+const isObserverError = Schema.is(PrivacyObserverError);
 const decodeConnection = Schema.decodeUnknownEffect(Schema.fromJsonString(Connection));
 const decodeRule = Schema.decodeUnknownEffect(PrivacyRule);
 const decodeJournal = Schema.decodeUnknownEffect(Schema.fromJsonString(PrivacyJournal));
@@ -44,14 +45,32 @@ const make = Effect.gen(function* () {
       const base = rule ? HttpClientRequest.post(url) : HttpClientRequest.get(url);
       const authenticated = base.pipe(HttpClientRequest.bearerToken(Redacted.make(config.token)));
       const req = rule ? yield* HttpClientRequest.bodyJson(authenticated, rule) : authenticated;
-      const response = yield* client
-        .execute(req)
-        .pipe(Effect.flatMap(HttpClientResponse.filterStatusOk));
+      const response = yield* client.execute(req);
+      if (rule && response.status === 400) {
+        const failure = yield* response.json.pipe(
+          Effect.flatMap(
+            Schema.decodeUnknownEffect(
+              Schema.Struct({
+                reason: Schema.Literals([
+                  "capacity",
+                  "active_experiment",
+                  "unknown_experiment",
+                  "invalid_rule",
+                ]),
+              }),
+            ),
+          ),
+        );
+        return yield* new PrivacyObserverError({ reason: failure.reason });
+      }
+      yield* HttpClientResponse.filterStatusOk(response);
       return yield* response.text;
     },
     Effect.provideService(FetchHttpClient.RequestInit, { redirect: "error" }),
     Effect.timeout("5 seconds"),
-    Effect.mapError(() => new PrivacyObserverError({ reason: "unavailable" })),
+    Effect.mapError((error) =>
+      isObserverError(error) ? error : new PrivacyObserverError({ reason: "unavailable" }),
+    ),
   );
 
   return PrivacyObserver.of({
@@ -86,7 +105,19 @@ const make = Effect.gen(function* () {
       }
       if (
         (input.action === "start-experiment" && input.durationSeconds === undefined) ||
-        (["stop-experiment", "finish-experiment"].includes(input.action) && !input.experimentId)
+        ([
+          "stop-experiment",
+          "finish-experiment",
+          "delete-experiment",
+          "experiment-metadata",
+          "experiment-outcome",
+        ].includes(input.action) &&
+          !input.experimentId)
+      )
+        return yield* new PrivacyObserverError({ reason: "invalid_rule" });
+      if (
+        (input.action === "experiment-metadata" && input.metadata === undefined) ||
+        (input.action === "experiment-outcome" && input.outcome === undefined)
       )
         return yield* new PrivacyObserverError({ reason: "invalid_rule" });
       yield* request(input);

@@ -39,6 +39,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.privacyControls]: "privacy",
   [WS_METHODS.privacyProviderChange]: "privacy",
   [WS_METHODS.privacySnapshot]: "privacy",
+  [WS_METHODS.privacySources]: "privacy",
   [WS_METHODS.privacyChange]: "privacy",
   [WS_METHODS.serverGetConfig]: "server",
   [WS_METHODS.serverRefreshProviders]: "server",

@@ -10,13 +10,31 @@ uv run --locked --project tools/privacy-observer python tools/privacy-observer/o
 
 Open the dashboard URL printed by the process. Its fragment contains a session access token; do not share it. The observer binds only to loopback. Keep it running during the test and stop with Ctrl+C afterward. Use different `--proxy-port`, `--dashboard-port`, and `--state-dir` values for simultaneous observers. The default ports are 8899 and 8898.
 
-## Open inside t3ch
+## Open inside t3po
 
-The shield icon in the sidebar opens **Privacy dashboard** inside t3ch. It is also available in the command palette and **Settings → General → Diagnostics**. Choose the machine running the observer.
+The shield icon in the sidebar opens **Privacy dashboard** inside t3po. It is also available in the command palette and **Settings → Maintenance**. Choose the machine running the observer.
 
 Start the observer on that machine. Set `T3CODE_PRIVACY_OBSERVER_FILE` in the T3 server's launch environment to the absolute `connectionFile` path printed at startup, then restart the T3 server. The file contains the observer's session credential, is created with owner-only permissions, and is refreshed when the observer restarts. Never commit or share it. The server reads it on each request; restarting the observer does not require restarting T3 again.
 
 The dashboard uses T3's authenticated connection, including remote connections. The observer stays on loopback, and its credential never reaches the browser. Diagnostics permission is required to view observations; settings permission is required to change blocks, review findings, or clear data. Without an observer connection, the page shows setup instructions. No traffic is captured until you configure a test session as below.
+
+## Connect another observer
+
+To inspect a separate service such as Honcho inference, run an observer beside that service and route its traffic explicitly. Configure `T3CODE_PRIVACY_OBSERVER_SOURCES` in the T3 server's launch environment, then restart that server:
+
+```json
+[
+  {
+    "id": "honcho",
+    "descriptorFile": "/absolute/private/honcho-observer.json",
+    "configuredHops": ["downstream-inference"]
+  }
+]
+```
+
+The descriptor must be on the T3 server machine and contain a loopback dashboard port and its access token, with the same format as the primary observer's connection file. For an observer on another machine, first establish an authenticated tunnel that binds only to local loopback; its private local descriptor must use the forwarded port and current remote token. Refresh the descriptor when the remote observer restarts. Keep these files owner-only. Do not expose the observer dashboard or proxy publicly.
+
+The embedded dashboard lets you select each source independently. Extra sources are read-only through T3; the primary source retains its existing permission checks. An unavailable source does not hide primary observations. A configured hop describes the intended setup, not verified traffic ownership: capture, memory delivery, downstream inference, delegation, and artifacts remain separate evidence gaps until correlated. Sources can overlap, so their counts are not combined. Older servers still show their primary observer.
 
 ## Route a test session
 
@@ -40,15 +58,17 @@ Client support differs: some CLIs ignore proxy or CA variables, use another trus
 
 The label identifies the process you chose to route; it is not automatic process attribution. Run one provider at a time when identifying traffic ownership. Telemetry/conversation categories are heuristics and do not prove whether the vendor, model, or a plugin authored a request.
 
+When T3 starts a Codex app-server process with an existing credential-free proxy route matching the configured observer, it can attach an expiring launch association. This identifies the issued route and initiating thread, not the process responsible for every request, a model action, or user authorization. Shared processes and copied route credentials limit that evidence. Associations expire after one hour or scope closure; observer restart also removes them. Missing attribution never stops provider traffic, and expired associations become unknown. Other adapters, helper probes, and direct traffic remain unattributed.
+
 ## Understand and test
 
-The dashboard shows exact destination hosts, outbound body sizes, recognized payload fields, request outcomes, and sensitive-data pattern findings. It inspects HTTP(S) requests and outbound WebSocket messages. Expected authentication headers are identified separately from possible secrets in bodies, URLs, or other headers. Paths, query values, raw bodies, header values, and matched secrets are not retained or exported. Compressed HTTP bodies are decoded by the proxy before inspection; reported sizes describe the decoded bodies, not network traffic totals. Only the first MiB of a body is scanned, and truncation is visible.
+The dashboard shows exact destination hosts, outbound body sizes, recognized payload fields, request outcomes, and sensitive-data pattern findings. It inspects HTTP(S) requests and outbound WebSocket messages. Authentication-shaped headers are identified separately from possible secrets in bodies, URLs, or other headers. Their location does not establish that the destination was intended or that disclosure was authorized. Paths, query values, raw bodies, header values, and matched secrets are not retained or exported. Compressed HTTP bodies are decoded by the proxy before inspection; reported sizes describe the decoded bodies, not network traffic totals. Only the first MiB of a body is scanned, and truncation is visible.
 
 Use **Block** on one exact host, retry the task, inspect failures, and **Unblock** to restore it. Blocking occurs before forwarding the inspected request or WebSocket message; it cannot retract previous requests or stop traffic outside the proxy. Upstream TLS connections may already exist, and rules do not provide OS isolation. No domains start blocked. Legacy **Block/Unblock** controls are session-only. Saved policies require explicit save/remove actions and survive observer restart. Temporary experiments require writable policy storage and expire after 1–3,600 seconds, using absolute timestamps even across restart. Expiry is enforced on requests and reads without dashboard polling; rollback never removes a newer rule. No policy is enabled by default. **Clear observations** keeps rules and saved findings; stopping the observer discards session rules and the in-memory request journal, but retains saved policies and time-limited experiments. Export contains masked metadata, at most 2,000 events and 500 finding aggregates. Destination names can themselves be sensitive; review reports before sharing.
 
 ## Track findings over time
 
-Possible sensitive-data matches and inspection gaps are grouped by operator source label, destination host, finding kind, and location. The ledger retains first/last observation times, request counts, blocked counts, latest outcome, and review state. Expected authentication headers do not create open issues. TLS/decode failures, truncated scans, and binary-content limitations do: absence of a detected secret does not close a coverage gap. Form-encoded bodies are also checked for credential fields and decoded sensitive patterns.
+Possible sensitive-data matches and inspection gaps are grouped by operator source label, destination host, finding kind, and location. The ledger retains first/last observation times, request counts, blocked counts, latest outcome, and review state. New authentication-shaped matches can create findings; they do not establish a valid credential or an inappropriate disclosure. Historical aggregates retain only the evidence available when recorded. TLS/decode failures, truncated scans, and binary-content limitations do: absence of a detected secret does not close a coverage gap. Form-encoded bodies are also checked for credential fields and decoded sensitive patterns.
 
 **Mark reviewed** acknowledges an investigation; it does not assert that the issue is fixed. A new occurrence reopens it. Test a proposed fix, compare the actual request outcome, and review the finding again only after examining that evidence. A blocked request is counted separately from a request with an upstream response. Changing a block does not rewrite prior evidence. Findings are not automatically assigned to a provider: use a distinct observer/source label for each controlled routing test.
 
@@ -74,6 +94,10 @@ Policy state is held in the private `findings.sqlite.policy` database beside the
 
 An experiment immediately blocks one exact host that is not already blocked. Baseline counters cover only retained events for that host; blocked and recovery counters cover proxy observations during those phases. Stop begins recovery early; finish ends collection. Recovery also ends automatically after one hour on access. Counters include observations, blocks, upstream responses (including HTTP errors), and transport errors. They never establish workflow success, provider identity, or direct-traffic coverage. Restarting an active experiment or a failed evidence write marks its evidence incomplete. Pending responses lost through restart, observation clearing, or journal eviction cannot be reconstructed.
 
-Saved policies require explicit removal; session Unblock cannot remove them. At most 256 rules and 100 experiments are retained; capacity rejects new entries rather than silently deleting evidence. There is currently no experiment-ledger deletion command; use a fresh, separate observer state directory for further trials at capacity. Only hosts, timestamps, random identifiers and counters enter this ledger; no request bodies, paths, header values, or credentials do. Source labels remain operator supplied and impact scope remains shared-proxy unknown. No verified provider/session attribution or last-verified coverage is claimed.
+Saved policies require explicit removal; session Unblock cannot remove them. At most 256 rules and 100 experiments are retained; capacity rejects new entries rather than silently deleting evidence. Delete a finished experiment by ID to reclaim capacity; active deletion is rejected and all rules are preserved. Experiments have independent, indefinite retention until explicitly deleted. Only hosts, timestamps, identifiers, allowlisted operator-asserted metadata, explicit user outcomes and counters enter this ledger; no request bodies, paths, header values, or credentials do. Source labels remain operator supplied and impact scope remains shared-proxy unknown. No verified provider/session attribution or last-verified coverage is claimed.
 
 Experiment evidence is marked incomplete when pending outcomes are lost to journal eviction or clearing, including for finished experiments with outstanding requests. Known connection and TLS failures count as transport errors; HTTP error responses remain responses. On malformed saved state, policy storage reports unavailable and the stored row is preserved for recovery. Saved rules cannot be restored from corrupt state; the dashboard must not be read as proof that those rules are enforced.
+
+Snapshots include generation time, session observation window, and a startup hash of loaded Python function code (not a repository revision or verified deployment). Events are a bounded memory ring; findings expire on rolling inactivity from lastSeen, so recurring firstSeen/counts may predate the retention window. Deletion is not secure erasure.
+
+Experiment metadata uses bounded task/provider/version identifiers and only telemetry, proxy and inheritance enum settings. These are operator assertions, not verified provider evidence. Explicit outcomes are unknown/succeeded/partial/failed and user-reported; HTTP errors still count as responses, WebSocket sends do not establish delivery or success. Per-phase destination counters cover all shared-proxy traffic, capped at 64 hosts per phase. Compare phase hosts with baseline hosts to identify newly observed routes; this is not causal attribution. Truncation, legacy missing evidence, restart and lost pending responses mark evidence incomplete. Task references must identify repeatable tasks without including prompt text or secrets.

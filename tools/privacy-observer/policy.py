@@ -1,6 +1,7 @@
 """Exact-host policy and masked experiments, serialized by the owning Journal lock."""
 from copy import deepcopy
 import json
+from ipaddress import ip_address
 import math
 import os
 from pathlib import Path
@@ -9,7 +10,7 @@ import sqlite3
 from time import time
 from uuid import uuid4
 
-ACTIONS = {'block', 'unblock', 'save-policy', 'remove-policy', 'start-experiment', 'stop-experiment', 'finish-experiment'}
+ACTIONS = {'block', 'unblock', 'save-policy', 'remove-policy', 'start-experiment', 'stop-experiment', 'finish-experiment', 'delete-experiment', 'experiment-metadata', 'experiment-outcome'}
 
 
 def hostname(value):
@@ -30,6 +31,52 @@ def counters(events=()):
         result['errors'] += event['status'].startswith('error') or event['status'] in {
             'not inspected; connection error', 'not inspected; TLS handshake failed'}
     return result
+
+
+OUTCOMES = ('unknown', 'succeeded', 'partial', 'failed')
+SETTINGS = {'telemetry': ('on', 'off', 'unknown'), 'proxy': ('configured', 'unknown'),
+            'inheritance': ('restricted', 'unrestricted', 'unknown')}
+
+
+def metadata(value):
+    if not isinstance(value, dict) or set(value) - {'taskRef', 'provider', 'providerVersion', 'settings', 'provenance'} or value.get('provenance') != 'operator-asserted':
+        raise ValueError('Invalid metadata')
+    for key in ('taskRef', 'provider', 'providerVersion'):
+        if key in value and (not isinstance(value[key], str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,63}', value[key])):
+            raise ValueError('Invalid metadata')
+    settings = value.get('settings', {})
+    if not isinstance(settings, dict) or any(key not in SETTINGS or val not in SETTINGS[key] for key, val in settings.items()):
+        raise ValueError('Invalid settings')
+    return deepcopy(value)
+
+
+def observed_host(value):
+    if not isinstance(value, str) or len(value) > 253:
+        return False
+    try:
+        hostname(value)
+    except ValueError:
+        try:
+            ip_address(value)
+        except ValueError:
+            return False
+    return True
+
+
+def destination_record(experiment, phase, host, status):
+    if not observed_host(host):
+        experiment.update(destinationsTruncated=True, evidenceIncomplete=True)
+        return
+    rows = experiment['destinations'][phase]
+    row = next((row for row in rows if row['host'] == host), None)
+    if row is None:
+        if len(rows) >= 64:
+            experiment.update(destinationsTruncated=True, evidenceIncomplete=True)
+            return
+        row = dict(host=host, **counters())
+        rows.append(row)
+    for key, value in counters([{'status': status}]).items():
+        row[key] += value
 
 
 def validate_state(data):
@@ -59,7 +106,7 @@ def validate_state(data):
         rules[rule['host']] = rule
     for e in data['experiments']:
         identity(e)
-        require(set(e) == {'id', 'host', 'startedAt', 'expiresAt', 'recoveryAt', 'finishedAt', 'phase',
+        require(set(e) - {'metadata', 'outcomeSource', 'destinations', 'destinationsTruncated'} == {'id', 'host', 'startedAt', 'expiresAt', 'recoveryAt', 'finishedAt', 'phase',
                           'baselineStartedAt', 'baselineEndedAt', 'evidenceIncomplete', 'baseline',
                           'blocked', 'recovery', 'outcome', 'evidence'})
         require(e['id'] not in experiments and e['phase'] in ('blocked', 'recovery', 'finished'))
@@ -68,13 +115,32 @@ def validate_state(data):
         require(all(e[key] is None or stamp(e[key]) for key in ('recoveryAt', 'finishedAt', 'baselineStartedAt')))
         require((e['recoveryAt'] is None) == (e['phase'] == 'blocked'))
         require((e['finishedAt'] is not None) == (e['phase'] == 'finished'))
-        require(type(e['evidenceIncomplete']) is bool and e['outcome'] == 'unknown' and
+        require(type(e['evidenceIncomplete']) is bool and e['outcome'] in OUTCOMES and
                 e['evidence'] == 'bounded-proxy-observations')
         for phase in ('baseline', 'blocked', 'recovery'):
             counts = e[phase]
             require(isinstance(counts, dict) and set(counts) == {'observed', 'blocked', 'responses', 'errors'})
             require(all(type(value) is int and value >= 0 for value in counts.values()))
             require(sum(counts[key] for key in ('blocked', 'responses', 'errors')) <= counts['observed'])
+        if 'metadata' in e:
+            metadata(e['metadata'])
+        require(e.get('outcomeSource', 'unknown') in ('unknown', 'user-reported'))
+        require(e['outcome'] == 'unknown' or e.get('outcomeSource') == 'user-reported')
+        if 'destinations' in e:
+            require(isinstance(e['destinations'], dict) and set(e['destinations']) == {'baseline', 'blocked', 'recovery'})
+            require(type(e.get('destinationsTruncated')) is bool)
+            for rows in e['destinations'].values():
+                require(isinstance(rows, list) and len(rows) <= 64)
+                hosts = set()
+                for row in rows:
+                    require(isinstance(row, dict) and set(row) == {'host', 'observed', 'blocked', 'responses', 'errors'})
+                    require(observed_host(row['host']) and row['host'] not in hosts)
+                    hosts.add(row['host'])
+                    require(all(type(row[key]) is int and row[key] >= 0 for key in counters()))
+                    require(sum(row[key] for key in ('blocked', 'responses', 'errors')) <= row['observed'])
+        else:
+            e.update(destinations={phase: [] for phase in ('baseline', 'blocked', 'recovery')}, destinationsTruncated=False, evidenceIncomplete=True)
+        e.setdefault('outcomeSource', 'unknown')
         experiments[e['id']] = e
     for rule in rules.values():
         if rule['kind'] == 'temporary':
@@ -109,7 +175,10 @@ class Policies:
                     data = json.loads(row[0])
                     self.rules, self.experiments = validate_state(data)
                     for e in self.experiments:
-                        if e['phase'] != 'finished':
+                        if e['phase'] != 'finished' or any(
+                            row['observed'] > sum(row[key] for key in ('blocked', 'responses', 'errors'))
+                            for rows in e['destinations'].values() for row in rows
+                        ):
                             e['evidenceIncomplete'] = True
                             self.dirty = True
                 self.status = 'ready'
@@ -163,23 +232,33 @@ class Policies:
         if self.dirty:
             self.flush()
 
-    def change(self, action, host, duration, identifier, events):
+    def change(self, action, host, duration, identifier, events, context=None, outcome=None, baseline_incomplete=False):
         self.expire()
         now = time()
-        if action in {'stop-experiment', 'finish-experiment'}:
+        if action in {'stop-experiment', 'finish-experiment', 'delete-experiment', 'experiment-metadata', 'experiment-outcome'}:
             if not isinstance(identifier, str) or not re.fullmatch('[a-f0-9]{32}', identifier):
                 raise ValueError('Invalid experiment')
             if not any(e['id'] == identifier for e in self.experiments):
-                raise ValueError('Unknown experiment')
+                raise ValueError('unknown_experiment')
         else:
             host = hostname(host)
         if action == 'start-experiment':
             if type(duration) is not int or not 1 <= duration <= 3600 or host in self.rules:
                 raise ValueError('Invalid duration or host already blocked')
-            if len(self.experiments) >= 100 or any(e['host'] == host and e['phase'] != 'finished' for e in self.experiments):
-                raise ValueError('Experiment capacity or active experiment')
+            if len(self.experiments) >= 100:
+                raise ValueError('capacity')
+            if any(e['host'] == host and e['phase'] != 'finished' for e in self.experiments):
+                raise ValueError('active_experiment')
         if action in {'block', 'save-policy', 'start-experiment'} and host not in self.rules and len(self.rules) >= 256:
-            raise ValueError('Rule capacity')
+            raise ValueError('capacity')
+        if context is not None:
+            context = metadata(context)
+        if action == 'experiment-metadata' and context is None:
+            raise ValueError('Invalid metadata')
+        if action == 'experiment-outcome' and outcome not in OUTCOMES:
+            raise ValueError('Invalid outcome')
+        if action == 'delete-experiment' and next(e for e in self.experiments if e['id'] == identifier)['phase'] != 'finished':
+            raise ValueError('active_experiment')
         previous = deepcopy((self.rules, self.experiments))
         if action in {'block', 'save-policy', 'start-experiment'}:
             if action == 'block' and self.rules.get(host, {}).get('kind') == 'saved':
@@ -188,7 +267,21 @@ class Policies:
             self.rules[host] = dict(id=identifier, host=host, kind={'block': 'session', 'save-policy': 'saved', 'start-experiment': 'temporary'}[action], createdAt=now, expiresAt=now + duration if action == 'start-experiment' else None)
             if action == 'start-experiment':
                 self.experiments.append(dict(id=identifier, host=host, startedAt=now, expiresAt=now + duration, recoveryAt=None, finishedAt=None, phase='blocked', baselineStartedAt=next((e['time'] for e in events if e['host'] == host), None), baselineEndedAt=now, evidenceIncomplete=False, baseline=counters(e for e in events if e['host'] == host), blocked=counters(), recovery=counters(), outcome='unknown', evidence='bounded-proxy-observations'))
-        elif action in {'unblock', 'remove-policy'}:
+                e = self.experiments[-1]
+                e.update(destinations={phase: [] for phase in ('baseline', 'blocked', 'recovery')}, destinationsTruncated=False, outcomeSource='unknown', evidenceIncomplete=baseline_incomplete)
+                if context is not None:
+                    e['metadata'] = context
+                for event in events:
+                    destination_record(e, 'baseline', event['host'], event['status'])
+        elif action in {'delete-experiment', 'experiment-metadata', 'experiment-outcome'}:
+            e = next(e for e in self.experiments if e['id'] == identifier)
+            if action == 'delete-experiment':
+                self.experiments.remove(e)
+            elif action == 'experiment-metadata':
+                e['metadata'] = context
+            else:
+                e.update(outcome=outcome, outcomeSource='user-reported')
+        elif action in {'unblock' , 'remove-policy'}:
             rule = self.rules.get(host)
             if rule and (rule['kind'] == 'saved') == (action == 'remove-policy'):
                 del self.rules[host]
@@ -214,18 +307,20 @@ class Policies:
         self.expire()
         refs = []
         for e in self.experiments:
-            if e['host'] == host and e['phase'] != 'finished':
+            if e['phase'] != 'finished':
                 phase = e['phase']
                 counts = counters([{'status': status}])
-                for key, value in counts.items():
-                    e[phase][key] += value
-                refs.append((e['id'], phase))
+                destination_record(e, phase, host, status)
+                if e['host'] == host:
+                    for key, value in counts.items():
+                        e[phase][key] += value
+                refs.append((e['id'], phase, host))
         if refs:
             self.flush()
         return refs
 
     def lose_outcomes(self, refs):
-        identifiers = {identifier for identifier, _phase in refs}
+        identifiers = {identifier for identifier, _phase, _host in refs}
         changed = False
         for e in self.experiments:
             if e['id'] in identifiers and not e['evidenceIncomplete']:
@@ -236,11 +331,15 @@ class Policies:
 
     def update(self, refs, old, status):
         before, after = counters([{'status': old}]), counters([{'status': status}])
-        for identifier, phase in refs:
+        for identifier, phase, host in refs:
             e = next((e for e in self.experiments if e['id'] == identifier), None)
             if e:
+                row = next((row for row in e['destinations'][phase] if row['host'] == host), None)
                 for key in before:
-                    e[phase][key] += after[key] - before[key]
+                    if e['host'] == host:
+                        e[phase][key] += after[key] - before[key]
+                    if row is not None:
+                        row[key] += after[key] - before[key]
         if refs:
             self.flush()
 

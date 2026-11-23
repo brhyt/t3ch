@@ -21,9 +21,11 @@ class ProxyTests(unittest.TestCase):
             cert, key = root / "upstream.pem", root / "upstream.key"
             subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", str(key), "-out", str(cert), "-days", "1", "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             received = []
+            proxy_headers = []
             class Upstream(BaseHTTPRequestHandler):
                 def log_message(self, *_args): pass
                 def do_POST(self):
+                    proxy_headers.append(self.headers.get("proxy-authorization"))
                     received.append(self.rfile.read(int(self.headers["Content-Length"])))
                     self.send_response(200)
                     self.send_header("Content-Length", "2")
@@ -44,18 +46,22 @@ class ProxyTests(unittest.TestCase):
                 startup = json.loads(process.stdout.readline())
                 dashboard, token = startup["dashboard"].split("#")
                 descriptor = Path(startup["connectionFile"])
-                self.assertEqual(json.loads(descriptor.read_text()), {"port": int(dashboard.split(":")[-1].split("/")[0]), "token": token})
+                self.assertEqual(json.loads(descriptor.read_text()), {"port": int(dashboard.split(":")[-1].split("/")[0]), "token": token, "proxyPort": proxy_port})
                 self.assertEqual(descriptor.stat().st_mode & 0o777, 0o600)
                 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
                 def api(path, body=None):
                     request = urllib.request.Request(dashboard.rstrip("/") + path, data=None if body is None else json.dumps(body).encode(), headers={"Authorization": "Bearer " + token})
                     with opener.open(request, timeout=5) as response:
                         return json.load(response)
+                lease = api("/api/launches", dict(action="register", providerInstanceId="codex-fixture", initiatingThreadId="thread-fixture"))
+                proxy = startup["proxy"].replace("http://", "http://t3-launch:" + lease["credential"] + "@")
                 def send():
-                    return subprocess.run(["curl", "--silent", "--show-error", "--max-time", "8", "--noproxy", "", "--proxy", startup["proxy"], "--cacert", startup["ca"], "-H", "Content-Type: application/json", "--data", '{"messages":[{"content":"person@example.test"}],"password":"synthetic-secret-value"}', "--write-out", "%{http_code}", f"https://localhost:{upstream.server_port}/private?token=synthetic-query"], capture_output=True, text=True, check=True).stdout
+                    return subprocess.run(["curl", "--silent", "--show-error", "--max-time", "8", "--noproxy", "", "--proxy", proxy, "--cacert", startup["ca"], "-H", "Content-Type: application/json", "--data", '{"messages":[{"content":"person@example.test"}],"password":"synthetic-secret-value"}', "--write-out", "%{http_code}", f"https://localhost:{upstream.server_port}/private?token=synthetic-query"], capture_output=True, text=True, check=True).stdout
                 self.assertEqual(send(), "ok200")
                 report = api("/api/events")
                 self.assertEqual(report["events"][0]["status"], "response 200")
+                self.assertEqual(report["events"][0]["launchAttribution"]["launchId"], lease["launchId"])
+                self.assertNotIn(lease["credential"], json.dumps(report))
                 self.assertNotIn("synthetic-secret-value", json.dumps(report))
                 self.assertTrue(report["events"][0]["findings"])
                 api("/api/rules", {"action": "block", "host": "localhost"})
@@ -64,6 +70,7 @@ class ProxyTests(unittest.TestCase):
                 api("/api/rules", {"action": "unblock", "host": "localhost"})
                 self.assertEqual(send(), "ok200")
                 self.assertEqual(len(received), 2)
+                self.assertEqual(proxy_headers, [None, None])
                 report = api("/api/events")
                 self.assertTrue(report["tracking"]["persistent"])
                 self.assertEqual(report["tracking"]["observedThisSession"], 3)

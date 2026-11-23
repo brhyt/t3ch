@@ -21,6 +21,10 @@ export function createPrivacyAtoms<R, E>(runtime: Atom.AtomRuntime<EnvironmentRe
       label: "privacy:providerChange",
       tag: WS_METHODS.privacyProviderChange,
     }),
+    sources: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "privacy:sources",
+      tag: WS_METHODS.privacySources,
+    }),
     snapshot: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "privacy:snapshot",
       tag: WS_METHODS.privacySnapshot,

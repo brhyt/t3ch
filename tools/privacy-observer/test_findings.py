@@ -18,12 +18,12 @@ class FindingsTests(unittest.TestCase):
             event = journal.add("API.TEST.", "POST", b'{"password":"do-not-retain-value"}', [("Authorization", "Bearer never-persist-header")], "/private-path?token=never-persist-query")
             journal.update(event, "response 200")
             issues = journal.snapshot()["issues"]
-            self.assertEqual(len(issues), 2)
+            self.assertEqual(len(issues), 3)
             identifier = next(issue["id"] for issue in issues if issue["location"] == "body")
             journal.change("review-finding", finding_id=identifier)
             journal.change("clear")
             self.assertEqual(journal.snapshot()["events"], [])
-            self.assertEqual(len(journal.snapshot()["issues"]), 2)
+            self.assertEqual(len(journal.snapshot()["issues"]), 3)
             journal.close()
             restored = Journal("codex-test", findings_path=path)
             try:

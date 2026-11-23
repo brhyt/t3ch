@@ -1,5 +1,7 @@
+import { readSourceCatalog, mayChangeSource } from "./privacySources.logic";
+import { PrivacyEventEvidence, PrivacyFindingEvidence } from "./PrivacyEventEvidence";
 import { PrivacyExperiments } from "./PrivacyExperiments";
-import { summarizeFlows } from "./privacy.logic";
+import { groupFindings, summarizeFlows } from "./privacy.logic";
 import { PrivacyOverview } from "./PrivacyOverview";
 import { PrivacyFindings } from "./PrivacyFindings";
 import { PrivacyControlsPanel } from "./PrivacyControlsPanel";
@@ -9,8 +11,9 @@ import {
   type EnvironmentId,
   type PrivacyRule,
   type PrivacyJournal,
+  type PrivacySourceSnapshot,
 } from "@t3tools/contracts";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { SidebarInset, SidebarTrigger } from "../ui/sidebar";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { isElectron } from "../../env";
@@ -86,28 +89,155 @@ export function PrivacyPage() {
 
 function ObserverPanel({ environmentId }: { environmentId: EnvironmentId }) {
   const canRead = useEnvironmentScope(environmentId, AuthDiagnosticsReadScope);
-  const canChange = useAtomValue(privacy.change.permissionAtom(environmentId));
-  const query = useEnvironmentQuery(
-    canRead ? privacy.snapshot({ environmentId, input: {} }) : null,
+  const catalogQuery = useEnvironmentQuery(
+    canRead ? privacy.sources({ environmentId, input: {} }) : null,
   );
+  const catalog = catalogQuery.isSuccess ? readSourceCatalog(catalogQuery.data) : null;
+  const [selected, setSelected] = useState("primary");
+  const legacy = useEnvironmentQuery(
+    canRead && selected === "primary" && !catalog && !catalogQuery.isPending
+      ? privacy.snapshot({ environmentId, input: {} })
+      : null,
+  );
+  const source = catalog?.sources.find((entry) => entry.id === selected);
+  const data = catalog
+    ? source?.status === "available"
+      ? source.journal
+      : null
+    : selected === "primary" && legacy.isSuccess
+      ? legacy.data
+      : null;
+  const refresh = () => {
+    catalogQuery.refresh();
+    if (!catalog && selected === "primary") legacy.refresh();
+  };
+  if (!canRead)
+    return (
+      <p role="status">
+        <span>Diagnostics permission is required to view this machine's traffic.</span>
+      </p>
+    );
+  return (
+    <div className="space-y-4">
+      <label className="flex items-center gap-2">
+        <span>Observer source</span>
+        <select
+          aria-label={"Observer source"}
+          className="rounded border bg-background p-2 text-sm"
+          value={selected}
+          onChange={(event) => setSelected(event.target.value)}
+        >
+          <option value="primary">primary</option>
+          {catalog?.sources
+            .filter((entry) => entry.id !== "primary")
+            .map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.id}
+              </option>
+            ))}
+          {selected !== "primary" && !source ? <option value={selected}>{selected}</option> : null}
+        </select>
+      </label>
+      {!catalog ? (
+        <p role="status">
+          <span>
+            Extra sources unavailable. Legacy primary evidence is shown when available; freshness is
+            unknown.
+          </span>
+        </p>
+      ) : catalog.configuration === "invalid-extras" ? (
+        <p role="status">
+          <span>Extra source configuration is invalid. Primary evidence remains separate.</span>
+        </p>
+      ) : null}
+      {source ? (
+        <section className="space-y-2 rounded border p-3 text-sm">
+          <p>
+            {source.id} · {source.status} · {source.freshness} ·{" "}
+            {source.permissions.change && source.id === "primary" ? (
+              <span>Source supports changes</span>
+            ) : (
+              <span>Read-only source</span>
+            )}
+          </p>
+          <p>
+            <span>Fetched at</span>:{" "}
+            {Number.isFinite(source.fetchedAt) && source.fetchedAt > 0 ? (
+              new Date(source.fetchedAt * 1000).toLocaleString()
+            ) : (
+              <span>Unknown</span>
+            )}
+          </p>
+          <p>
+            <span>
+              Configured hops are operator assertions, not proof of capture or delivery. Sources may
+              overlap; their evidence is not combined.
+            </span>
+          </p>
+          <ul>
+            {["capture", "memory-delivery", "downstream-inference", "delegation", "artifacts"].map(
+              (hop) => (
+                <li key={hop}>
+                  {hop} ·{" "}
+                  {source.hops.find((entry) => entry.hop === hop)?.configured ? (
+                    <span>Configured</span>
+                  ) : (
+                    <span>Not configured</span>
+                  )}{" "}
+                  · <span>Unverified</span>
+                </li>
+              ),
+            )}
+          </ul>
+        </section>
+      ) : null}
+      <SourceView
+        key={JSON.stringify([environmentId, selected])}
+        environmentId={environmentId}
+        sourceId={selected}
+        source={source}
+        data={data}
+        query={{
+          isPending: catalogQuery.isPending || legacy.isPending,
+          error: !catalog && !!legacy.error,
+          dataUpdatedAt: source && Number.isFinite(source.fetchedAt) ? source.fetchedAt * 1000 : 0,
+          refresh,
+        }}
+      />
+    </div>
+  );
+}
+
+function SourceView({
+  environmentId,
+  sourceId,
+  source,
+  data,
+  query,
+}: {
+  environmentId: EnvironmentId;
+  sourceId: string;
+  source: PrivacySourceSnapshot | undefined;
+  data: PrivacyJournal | null;
+  query: { isPending: boolean; error: boolean; dataUpdatedAt: number; refresh: () => void };
+}) {
+  const canRead = useEnvironmentScope(environmentId, AuthDiagnosticsReadScope);
+  const callerCanChange = useAtomValue(privacy.change.permissionAtom(environmentId));
+  const canChange = mayChangeSource(callerCanChange, sourceId, source?.permissions.change ?? true);
   const change = useAtomCommand(privacy.change);
   const [pending, setPending] = useState(false);
   const [view, setView] = useState("overview");
   const [outcome, setOutcome] = useState("all");
   const [search, setSearch] = useState("");
   const [sensitiveOnly, setSensitiveOnly] = useState(false);
-  const data = query.isSuccess ? query.data : null;
   const refresh = query.refresh;
-  const hasData = data !== null;
-  useEffect(() => {
-    if (!canRead || !hasData) return;
-    const timer = setInterval(() => {
-      if (!document.hidden) refresh();
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [canRead, hasData, refresh]);
   async function apply(rule: PrivacyRule) {
-    if (pending || !canChange) return;
+    if (
+      pending ||
+      !canRead ||
+      !mayChangeSource(callerCanChange, sourceId, source?.permissions.change ?? true)
+    )
+      return;
     setPending(true);
     const result = await change({ environmentId, input: rule }).finally(() => setPending(false));
     if (result._tag === "Success") refresh();
@@ -131,7 +261,7 @@ function ObserverPanel({ environmentId }: { environmentId: EnvironmentId }) {
           (outcome === "blocked"
             ? event.status === "blocked"
             : /^response \d+$/.test(event.status))) &&
-        (!sensitiveOnly || event.findings.some((finding) => !finding.expected)),
+        (!sensitiveOnly || event.findings.length > 0),
     )
     .toReversed();
   return (
@@ -158,7 +288,18 @@ function ObserverPanel({ environmentId }: { environmentId: EnvironmentId }) {
         ))}
       </nav>
       {view === "controls" ? (
-        <PrivacyControlsPanel environmentId={environmentId} />
+        sourceId === "primary" ? (
+          <>
+            <p>
+              <span>These controls apply to the entire selected machine.</span>
+            </p>
+            <PrivacyControlsPanel environmentId={environmentId} />
+          </>
+        ) : (
+          <p role="status">
+            <span>Environment controls are unavailable while viewing a read-only source.</span>
+          </p>
+        )
       ) : (
         <>
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -175,7 +316,10 @@ function ObserverPanel({ environmentId }: { environmentId: EnvironmentId }) {
                 )}
               </h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                <span>Observe first. Blocks are manual and affect only this proxy.</span>
+                <span>
+                  Understand the data flows we can observe, what likely caused them, and what
+                  changes when you intervene.
+                </span>
               </p>
             </div>
             <Button variant="outline" size="sm" disabled={query.isPending} onClick={refresh}>
@@ -184,10 +328,14 @@ function ObserverPanel({ environmentId }: { environmentId: EnvironmentId }) {
           </div>
           {query.error ? (
             <p role="alert" className="text-sm text-destructive">
-              {query.error}
+              <span>Selected source unavailable.</span>
             </p>
           ) : null}
-          {!data ? (
+          {!data && (sourceId !== "primary" || source?.status === "unavailable" || query.error) ? (
+            <p role="status">
+              <span>Selected source unavailable.</span>
+            </p>
+          ) : !data ? (
             <div className="space-y-3 rounded-lg border p-4">
               <h3 className="font-medium">
                 {query.isPending ? <span>Connecting</span> : <span>Connect the observer</span>}
@@ -203,11 +351,7 @@ function ObserverPanel({ environmentId }: { environmentId: EnvironmentId }) {
                     a test provider through its proxy to begin capture.
                   </span>
                 </p>
-                <pre className="overflow-auto rounded bg-muted p-3 text-xs">
-                  {
-                    "vp run privacy:observe\nT3CODE_PRIVACY_OBSERVER_FILE=/absolute/path/.t3-privacy/observer.json"
-                  }
-                </pre>
+
                 <p className="text-sm text-muted-foreground">
                   <span>
                     Saved policies survive observer restarts. Live observations are bounded;
@@ -219,7 +363,11 @@ function ObserverPanel({ environmentId }: { environmentId: EnvironmentId }) {
           ) : (
             <>
               {view === "overview" ? (
-                <PrivacyOverview journal={data} refreshing={query.isPending} />
+                <PrivacyOverview
+                  journal={data}
+                  refreshing={query.isPending}
+                  fetchedAt={query.dataUpdatedAt}
+                />
               ) : null}
               {view === "findings" ? (
                 <PrivacyFindings
@@ -332,10 +480,19 @@ function ObserverPanel({ environmentId }: { environmentId: EnvironmentId }) {
                       <thead className="bg-muted">
                         <tr>
                           <th className="p-3">
-                            <span>Time / source</span>
+                            <span>Time</span>
                           </th>
                           <th className="p-3">
-                            <span>Destination / purpose</span>
+                            <span>Destination</span>
+                          </th>
+                          <th className="p-3">
+                            <span>Inferred purpose</span>
+                          </th>
+                          <th className="p-3">
+                            <span>Initiating component</span>
+                          </th>
+                          <th className="p-3">
+                            <span>Workflow association</span>
                           </th>
                           <th className="p-3">
                             <span>What was observed</span>
@@ -353,23 +510,27 @@ function ObserverPanel({ environmentId }: { environmentId: EnvironmentId }) {
                           <tr key={event.id} className="border-t align-top">
                             <td className="p-3">
                               {new Date(event.time * 1000).toLocaleTimeString()}
-                              <div className="text-muted-foreground">{event.source}</div>
                             </td>
                             <td className="p-3">
                               <div className="break-all">{event.host}</div>
-                              <div className="text-muted-foreground">{event.category}</div>
+                            </td>
+                            <td className="p-3">{event.category}</td>
+                            <td className="p-3">
+                              {event.launchAttribution?.component ?? <span>Unknown</span>}
+                              <div>{event.launchAttribution?.evidence ?? "unknown"}</div>
+                              <div>
+                                {event.source} · <span>Operator-supplied</span>
+                              </div>
+                            </td>
+                            <td className="p-3">
+                              <span>Unknown</span>
                             </td>
                             <td className="p-3">
                               <details>
                                 <summary className="cursor-pointer">
                                   <span>Inspect masked metadata</span>
                                 </summary>
-                                <p className="my-2 text-muted-foreground">
-                                  <span>
-                                    Provider and session attribution: unknown. Source is
-                                    operator-supplied; category is inferred.
-                                  </span>
-                                </p>
+                                <PrivacyEventEvidence event={event} />
                                 {event.method} · {event.bodyBytes.toLocaleString()} B
                                 <div>{event.fields.join(", ")}</div>
                                 <div className="text-muted-foreground">{event.inspection}</div>
@@ -383,20 +544,10 @@ function ObserverPanel({ environmentId }: { environmentId: EnvironmentId }) {
                             <td className="p-3">
                               {event.findings.length ? (
                                 groupFindings(event.findings).map(({ key, ...finding }) => (
-                                  <div
-                                    key={key}
-                                    className={
-                                      finding.expected
-                                        ? "text-muted-foreground"
-                                        : "text-destructive"
-                                    }
-                                  >
+                                  <div key={key} className="text-destructive">
                                     {finding.kind} · {finding.location} ×{finding.count} ·{" "}
-                                    {finding.expected ? (
-                                      <span>Expected authentication</span>
-                                    ) : (
-                                      <span>Value masked</span>
-                                    )}
+                                    <span>Value masked</span>
+                                    <PrivacyFindingEvidence finding={finding} />
                                   </div>
                                 ))
                               ) : (
@@ -469,13 +620,4 @@ function ObserverPanel({ environmentId }: { environmentId: EnvironmentId }) {
       )}
     </div>
   );
-}
-
-function groupFindings(findings: PrivacyJournal["events"][number]["findings"]) {
-  const groups = new Map<string, (typeof findings)[number]>();
-  for (const finding of findings) {
-    const key = `${finding.kind}:${finding.location}:${finding.expected}`;
-    groups.set(key, { ...finding, count: (groups.get(key)?.count ?? 0) + finding.count });
-  }
-  return [...groups].map(([key, finding]) => ({ key, ...finding }));
 }

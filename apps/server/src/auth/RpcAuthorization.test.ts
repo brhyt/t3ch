@@ -37,6 +37,7 @@ describe("RPC authorization scopes", () => {
   });
 
   it("reserves privacy observations for diagnostics readers and block rules for settings writers", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.privacySources)).toBe(AuthDiagnosticsReadScope);
     expect(requiredScopeForRpcMethod(WS_METHODS.privacySnapshot)).toBe(AuthDiagnosticsReadScope);
     expect(requiredScopeForRpcMethod(WS_METHODS.privacyControls)).toBe(AuthDiagnosticsReadScope);
     expect(requiredScopeForRpcMethod(WS_METHODS.privacyProviderChange)).toBe(

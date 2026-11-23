@@ -38,6 +38,30 @@ class PolicyTests(unittest.TestCase):
             j.close()
             self.assertNotIn(b'secret-fixture', Path(str(path) + '.policy').read_bytes())
 
+    def test_observed_destinations_preserve_saved_rules_after_restart(self):
+        for phase in ('baseline', 'blocked', 'recovery'):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / 'db'
+                j = Journal('fixture', findings_path=path)
+                j.change('save-policy', 'saved.test')
+                if phase != 'baseline':
+                    j.change('start-experiment', 'trial.test', duration_seconds=60)
+                    if phase == 'recovery':
+                        j.change('stop-experiment', experiment_id=j.snapshot()['experiments'][0]['id'])
+                for host in ('::1', '2001:db8::1', 'UPPER.example.'):
+                    j.add(host, 'GET', b'', [], '', 'response 200')
+                if phase == 'baseline':
+                    j.change('start-experiment', 'trial.test', duration_seconds=60)
+                j.close()
+                j = Journal('fixture', findings_path=path)
+                try:
+                    self.assertEqual(j.snapshot()['policyStorage']['status'], 'ready')
+                    self.assertTrue(j.is_blocked('saved.test'))
+                    rows = j.snapshot()['experiments'][0]['destinations'][phase]
+                    self.assertEqual({row['host'] for row in rows}, {'::1', '2001:db8::1', 'upper.example'})
+                finally:
+                    j.close()
+
     def test_validation_and_unavailable_storage(self):
         j = Journal('fixture')
         self.addCleanup(j.close)
@@ -151,3 +175,81 @@ class PolicyTests(unittest.TestCase):
                 j.close()
                 with sqlite3.connect(str(path) + '.policy') as db:
                     self.assertEqual(db.execute('SELECT data FROM policy').fetchone()[0], original)
+
+    def test_durable_metadata_outcome_destinations_delete_and_stale_refs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'db'
+            j = Journal('fixture', findings_path=path)
+            j.change('save-policy', 'saved.test')
+            j.change('block', 'session.test')
+            j.add('baseline.test', 'GET', b'', [], '', 'response 503')
+            j.change('start-experiment', 'trial.test', duration_seconds=60,
+                     metadata={'taskRef': 'task-42', 'provider': 'codex', 'providerVersion': '1.2', 'provenance': 'operator-asserted', 'settings': {'telemetry': 'off'}})
+            e = j.snapshot()['experiments'][0]
+            with self.assertRaisesRegex(ValueError, 'active_experiment'):
+                j.change('delete-experiment', experiment_id=e['id'])
+            pending = j.add('alternative.test', 'POST', b'', [], '', 'pending')
+            j.add('socket.test', 'WS', b'', [], '', 'outbound WebSocket')
+            j.change('stop-experiment', experiment_id=e['id'])
+            j.update(pending, 'response 500')
+            j.add('recovery.test', 'GET', b'', [], '', 'error; delivery uncertain')
+            e = j.snapshot()['experiments'][0]
+            self.assertEqual(e['outcome'], 'unknown')
+            self.assertEqual(e['destinations']['blocked'][0]['responses'], 1)
+            self.assertEqual(e['destinations']['blocked'][1]['responses'], 0)
+            self.assertEqual(e['destinations']['recovery'][0]['errors'], 1)
+            j.change('experiment-outcome', experiment_id=e['id'], outcome='partial')
+            j.change('finish-experiment', experiment_id=e['id'])
+            j.close()
+            j = Journal('fixture', findings_path=path)
+            self.assertEqual(j.snapshot()['experiments'][0]['metadata']['taskRef'], 'task-42')
+            self.assertEqual(j.snapshot()['experiments'][0]['outcomeSource'], 'user-reported')
+            j.change('block', 'session.test')
+            j.change('delete-experiment', experiment_id=e['id'])
+            self.assertTrue(j.is_blocked('session.test'))
+            self.assertTrue(j.is_blocked('saved.test'))
+            j.change('start-experiment', 'trial.test', duration_seconds=60)
+            j.policies.update([(e['id'], 'blocked', 'trial.test')], 'pending', 'response 200')
+            self.assertEqual(j.snapshot()['experiments'][0]['blocked']['responses'], 0)
+            j.close()
+
+    def test_actual_legacy_migration_and_destination_capacity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'db'
+            j = Journal('fixture', findings_path=path)
+            j.change('start-experiment', 'trial.test', duration_seconds=60)
+            j.close()
+            with sqlite3.connect(str(path) + '.policy') as db:
+                data = json.loads(db.execute('SELECT data FROM policy').fetchone()[0])
+                for key in ('destinations', 'destinationsTruncated', 'outcomeSource'):
+                    del data['experiments'][0][key]
+                db.execute('UPDATE policy SET data=?', (json.dumps(data),))
+            j = Journal('fixture', findings_path=path)
+            for n in range(65):
+                j.add(f'h{n}.test', 'WS', b'', [], '', 'outbound WebSocket')
+            e = j.snapshot()['experiments'][0]
+            self.assertTrue(e['evidenceIncomplete'])
+            self.assertTrue(e['destinationsTruncated'])
+            self.assertEqual(len(e['destinations']['blocked']), 64)
+            j.change('finish-experiment', experiment_id=e['id'])
+            from copy import deepcopy
+            j.policies.experiments = [dict(deepcopy(e), id=f'{n:032x}', phase='finished', finishedAt=e['startedAt'], recoveryAt=e['startedAt']) for n in range(100)]
+            with self.assertRaisesRegex(ValueError, 'capacity'):
+                j.change('start-experiment', 'next.test', duration_seconds=60)
+            j.change('delete-experiment', experiment_id=f'{0:032x}')
+            j.change('start-experiment', 'next.test', duration_seconds=60)
+            j.close()
+
+    def test_snapshot_identity_window_and_safe_metadata(self):
+        j = Journal('fixture', capacity=1)
+        self.addCleanup(j.close)
+        j.add('a.test', 'GET', b'', [], '', 'response 200')
+        j.add('b.test', 'GET', b'', [], '', 'response 200')
+        snapshot = j.snapshot()
+        self.assertGreaterEqual(snapshot['generatedAt'], snapshot['tracking']['sessionStartedAt'])
+        self.assertEqual(len(snapshot['component']['version']), 64)
+        self.assertTrue(snapshot['observationWindow']['truncated'])
+        from policy import metadata
+        for value in ({'taskRef': 'raw prompt text', 'provenance': 'operator-asserted'}, {'provenance': 'verified'}, {'provenance': 'operator-asserted', 'settings': {'TOKEN': 'secret'}}):
+            with self.assertRaises(ValueError):
+                metadata(value)

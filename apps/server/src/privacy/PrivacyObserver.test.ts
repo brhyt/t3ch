@@ -124,3 +124,45 @@ it.effect("returns a safe error when the observer fails", () =>
     expect(JSON.stringify(error)).not.toContain("private upstream output");
   }).pipe(Effect.provide(NodeServices.layer)),
 );
+
+it.effect("validates experiment actions and preserves safe observer rejection reasons", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const directory = yield* fs.makeTempDirectoryScoped();
+    const path = `${directory}/observer.json`;
+    yield* fs.writeFileString(path, JSON.stringify({ port: 8898, token: "a".repeat(32) }));
+    for (const reason of ["capacity", "active_experiment", "unknown_experiment"] as const) {
+      const observer = yield* Observer.PrivacyObserver.pipe(
+        Effect.provide(
+          Observer.layer.pipe(
+            Layer.provide(
+              ConfigProvider.layer(
+                ConfigProvider.fromUnknown({ T3CODE_PRIVACY_OBSERVER_FILE: path }),
+              ),
+            ),
+          ),
+        ),
+        Effect.provideService(FetchHttpClient.Fetch, async () =>
+          Response.json({ reason, secret: "excluded" }, { status: 400 }),
+        ),
+      );
+      expect(
+        (yield* observer
+          .change({ action: "delete-experiment", experimentId: "a".repeat(32) })
+          .pipe(Effect.flip)).reason,
+      ).toBe(reason);
+      for (const action of [
+        "experiment-metadata",
+        "experiment-outcome",
+        "delete-experiment",
+      ] as const) {
+        expect((yield* observer.change({ action }).pipe(Effect.flip)).reason).toBe("invalid_rule");
+      }
+      expect(
+        (yield* observer
+          .change({ action: "experiment-outcome", experimentId: "a".repeat(32) })
+          .pipe(Effect.flip)).reason,
+      ).toBe("invalid_rule");
+    }
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
