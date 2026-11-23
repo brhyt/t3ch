@@ -110,6 +110,7 @@ def category(host, fields):
 
 class Journal:
     def __init__(self, label, capacity=2000, findings_path=None, retention_days=RETENTION_DAYS):
+        # Version 0 omits reference-sharing flags that differ between script and import loading.
         digest = hashlib.sha256()
         for name in ('inspection', 'policy', 'findings', 'observer', 'attribution'):
             module = sys.modules.get(name)
@@ -121,12 +122,12 @@ class Journal:
                 for key, value in sorted(vars(module).items()):
                     code = getattr(value, '__code__', None)
                     if code is not None:
-                        digest.update(marshal.dumps(code))
+                        digest.update(marshal.dumps(code, 0))
                     if isinstance(value, type) and value.__module__ == module.__name__:
                         for method in vars(value).values():
                             code = getattr(method, '__code__', None)
                             if code is not None:
-                                digest.update(marshal.dumps(code))
+                                digest.update(marshal.dumps(code, 0))
         self.component = dict(name='privacy-observer', version=digest.hexdigest(), identityKind='loaded-python-code-sha256')
         self.launches = Launches()
         self.label = label[:128]

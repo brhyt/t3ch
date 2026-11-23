@@ -59,6 +59,11 @@ class ProxyTests(unittest.TestCase):
                     return subprocess.run(["curl", "--silent", "--show-error", "--max-time", "8", "--noproxy", "", "--proxy", proxy, "--cacert", startup["ca"], "-H", "Content-Type: application/json", "--data", '{"messages":[{"content":"person@example.test"}],"password":"synthetic-secret-value"}', "--write-out", "%{http_code}", f"https://localhost:{upstream.server_port}/private?token=synthetic-query"], capture_output=True, text=True, check=True).stdout
                 self.assertEqual(send(), "ok200")
                 report = api("/api/events")
+                reconstructed = subprocess.check_output(
+                    [sys.executable, "-B", "-c", "import json, observer; j = observer.Journal('verification'); print(json.dumps(j.component)); j.close()"],
+                    cwd=Path(__file__).resolve().parent, text=True,
+                )
+                self.assertEqual(report["component"], json.loads(reconstructed))
                 self.assertEqual(report["events"][0]["status"], "response 200")
                 self.assertEqual(report["events"][0]["launchAttribution"]["launchId"], lease["launchId"])
                 self.assertNotIn(lease["credential"], json.dumps(report))
